@@ -16,7 +16,7 @@ import { renderSettings, openEnvModal, openRedfoxApply, saveEnvConfig, restartSe
 import { renderInspiration, renderInspirationCards, onInspirationFilterChange, trashInspiration, restoreInspiration, permanentlyDeleteInspiration, updateInspirationListStatus, updateTrashSelection, toggleAllTrash, batchDeleteTrash, toggleInspirationFavorite, feedbackInspiration, generateInspirations, updateInspirationStatus, sendIdeaToCreator, clearInspirationSelection, batchFavoriteInspirations, batchTrashInspirations, toggleInspirationSourceDropdown } from './pages/inspiration.js';
 import { renderKnowledgebase, renderLibrary, addToLibrary, removeFromLibrary, exportLibrary, switchKbTab, switchKbSource, renderKbLibrary, loadKbEntries, renderKbGrid, renderKbFolderTree, searchKb, openKbEntry, openKbEntryModal, analyzeKbEntry, showKbAnalysisResult, reanalyzeKbEntry, matchKbToInspirations, renderMatchedInspirations, linkKbMatchByIndex, openKbConfigModal, saveKbConfig, createKbEntry, submitKbEntry, linkKbToInspiration, linkKbPickerByIndex, sendKbToCreator, renderWersss, openWersssConfig, saveWersssConfig, addWersssSub, loadWersssAvailable, selectWersssMp, searchWersssMp, confirmAddWersssSub, removeWersssSub, syncWersss, prefetchWersss, openWersssArticle, closeWersssArticleModal, selectKbFolder, toggleKbFolder } from './pages/knowledgebase.js';
 import { renderCreator, sendToCreator, doCheckWord, inspectSensitiveHtml, analyzeRewriteHotspots, openActionLogs, renderRewriteHotspots, selectRewriteHotspot, clearSelectedHotspot, doRewrite, copyRewrite, generateCover, clearCreatorSource } from './pages/creator.js';
-import { renderMyAccounts, addMyAccount, submitMyAccount, removeMyAccount, editMyAccount, extractMyTracks, extractMyStyle, viewMyStyle, presetMyInspirations, addPresetToInspirations } from './pages/my.js';
+import { renderMyAccounts, addMyAccount, submitMyAccount, removeMyAccount, editMyAccount, extractMyTracks, extractMyStyle, viewMyStyle, presetMyInspirations, createAutoConfigs } from './pages/my.js';
 import { renderSkills, filterSkills, openSkillDetail, openAgentWithSkill, checkSkillUpdates, updateCommunitySkillsUi, renderAgent, loadAgentThreads, saveAgentThreads, startNewAgentThread, switchAgentThread, clearCurrentAgentThread, deleteAgentThread, renderAgentThreads, onAgentProviderChange, formatTime, copyAgentMessage, deleteAgentMessage, regenerateAgentMessage, toggleStreamingIndicator, handleAgentInputKeydown, renderAgentMessages, showSkillCommands, insertSkillCommand, sendAgentMessage, loadSkills, clearSkillCache } from './pages/agent.js';
 import { gotoPage, refreshCurrent, doGlobalSearch, toggleSidebar, openMobileSidebar, closeMobileSidebar } from './router.js';
 import { initErrorBoundary } from './errorBoundary.js';
@@ -296,7 +296,7 @@ registerAction('extractMyTracks', (el, d) => extractMyTracks(el, d));
 registerAction('extractMyStyle', (el, d) => extractMyStyle(el, d));
 registerAction('viewMyStyle', (el, d) => viewMyStyle(el, d));
 registerAction('presetMyInspirations', (el, d) => presetMyInspirations(el, d));
-registerAction('addPresetToInspirations', () => addPresetToInspirations());
+registerAction('createAutoConfigs', () => createAutoConfigs());
 registerAction('reanalyzeKbEntry', () => reanalyzeKbEntry());
 registerAction('linkKbMatchByIndex', (_, d) => linkKbMatchByIndex(Number(d.index)));
 registerAction('saveKbConfig', () => saveKbConfig());

@@ -97,7 +97,7 @@
           <i data-lucide="book-open" class="w-4 h-4"></i><span class="nav-text">知识库</span>
         </a>
         <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm" data-page="creator" data-action="gotoPage">
-          <i data-lucide="sparkles" class="w-4 h-4"></i><span class="nav-text">AI 创作助手</span>
+          <i data-lucide="sparkles" class="w-4 h-4"></i><span class="nav-text">AI 创作</span>
           <span class="ml-auto pill pill-brand nav-badge">New</span>
         </a>
         <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm" data-page="skills" data-action="gotoPage">
@@ -570,7 +570,7 @@
 <div class="p-6 space-y-5">
   <div class="page-header">
     <div>
-      <div class="page-header-title"><i data-lucide="sparkles" class="w-5 h-5 text-pink-400"></i>AI 创作助手</div>
+      <div class="page-header-title"><i data-lucide="sparkles" class="w-5 h-5 text-pink-400"></i>AI 创作</div>
       <div class="page-header-sub">违禁词检测、多平台重构、AI 封面一键生成</div>
     </div>
   </div>
@@ -587,8 +587,16 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
     <div class="space-y-4 flex flex-col">
       <div class="glass-strong rounded-xl p-5 flex-1 flex flex-col min-h-[480px]">
-        <h3 class="text-sm font-semibold mb-3">① 输入灵感</h3>
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 class="text-sm font-semibold">① 输入素材</h3>
+          <div class="inline-flex rounded-md bg-white/[0.03] p-0.5" id="creator-mode-tabs">
+            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab bg-purple-500/20 text-purple-300" data-mode="rewrite" title="基于素材扩展结构和打磨">重构</button>
+            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab text-gray-400 hover:text-gray-200" data-mode="create" title="从零创作（可适当发挥，但遵守事实底线）">创作</button>
+            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab text-gray-400 hover:text-gray-200" data-mode="adapt" title="直接换风格，不补充新事实">改写</button>
+          </div>
+        </div>
         <textarea class="input w-full flex-1 resize-none min-h-0 text-sm leading-relaxed" id="creatorInput" placeholder="粘贴一段爆款文案，或输入一个选题关键词..."></textarea>
+        <div id="creator-mode-hint" class="text-[10px] text-gray-500 mt-2">重构模式：在原素材基础上扩展结构和打磨，保留事实</div>
       </div>
       <div class="glass rounded-xl p-5">
         <h3 class="text-sm font-semibold mb-3">② 违禁词体检（真实 API）</h3>
@@ -607,7 +615,7 @@
     </div>
     <div class="space-y-4">
       <div class="glass-strong rounded-xl p-5">
-        <h3 class="text-sm font-semibold mb-3">③ 多平台重构</h3>
+        <h3 class="text-sm font-semibold mb-3">③ 多平台输出</h3>
         <div class="flex items-center gap-2 mb-3 flex-wrap">
           <select class="input py-1.5 text-xs" id="rewritePlatform" style="width:auto">
             <option value="小红书">小红书笔记</option>
@@ -624,7 +632,7 @@
           </select>
           <button class="btn btn-ghost py-1.5 text-xs" id="hotspotAnalyzeBtn" data-action="analyzeRewriteHotspots"><i data-lucide="trending-up" class="w-3.5 h-3.5"></i>分析可蹭热点</button>
           <button class="btn btn-ghost py-1.5 text-xs" data-action="openActionLogs"><i data-lucide="scroll-text" class="w-3.5 h-3.5"></i>调用日志</button>
-          <button class="btn btn-primary py-1.5 text-xs ml-auto" data-action="doRewrite"><i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i>开始重构</button>
+          <button class="btn btn-primary py-1.5 text-xs ml-auto" data-action="doRewrite" id="doRewriteBtn"><i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i><span id="doRewriteLabel">开始重构</span></button>
         </div>
         <div id="rewriteHotspotPanel" class="hidden mb-4 rounded-lg border border-white/10 bg-black/20 p-3">
           <div class="flex items-center justify-between mb-2">

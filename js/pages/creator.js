@@ -8,6 +8,41 @@ import { initIcons } from '../icons.js';
 
 let rewriteHotspots = [];
 let selectedRewriteHotspot = null;
+let currentCreatorMode = 'rewrite';  // create / rewrite / adapt
+const MODE_META = {
+  create:  { label: '开始创作', hint: '创作模式：基于主题/大纲从零写，可适当发挥但遵守事实底线' },
+  rewrite: { label: '开始重构', hint: '重构模式：在原素材基础上扩展结构和打磨，保留事实' },
+  adapt:   { label: '开始改写', hint: '改写模式：直接换风格，不补充新事实，仅风格转换、句式重组' },
+};
+
+function bindCreatorModeTabs() {
+  document.querySelectorAll('.creator-mode-tab').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
+      currentCreatorMode = mode;
+      document.querySelectorAll('.creator-mode-tab').forEach(b => {
+        const active = b.dataset.mode === mode;
+        b.classList.toggle('bg-purple-500/20', active);
+        b.classList.toggle('text-purple-300', active);
+        b.classList.toggle('text-gray-400', !active);
+      });
+      const hint = document.getElementById('creator-mode-hint');
+      if (hint) hint.textContent = MODE_META[mode]?.hint || '';
+      const label = document.getElementById('doRewriteLabel');
+      if (label) label.textContent = MODE_META[mode]?.label || '开始';
+      const ph = document.getElementById('creatorInput');
+      if (ph) {
+        ph.placeholder = mode === 'create'
+          ? '输入主题/大纲/关键词，AI 会基于此创作全新内容...'
+          : mode === 'adapt'
+            ? '粘贴要换风格的原文，AI 直接改写不补充事实...'
+            : '粘贴一段爆款文案，或输入一个选题关键词...';
+      }
+    });
+  });
+}
 
 export function renderCreator() {
   const source = LS.get('creatorSource', null);
@@ -30,6 +65,7 @@ export function renderCreator() {
   }
   initIcons(document.getElementById('content-area'));
   loadStyleProfiles();
+  bindCreatorModeTabs();
 }
 
 async function loadStyleProfiles() {
@@ -234,6 +270,7 @@ export async function doRewrite() {
         tone: document.getElementById('rewriteTone').value,
         hotspot: selectedRewriteHotspot,
         styleProfile,
+        mode: currentCreatorMode,
       },
     });
     document.getElementById('rewriteTitle').value = result.title || '';

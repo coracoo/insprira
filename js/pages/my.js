@@ -80,8 +80,8 @@ function renderAccountCard(a) {
     </div>
 
     <div class="pt-2 border-t border-white/5 flex items-center gap-1">
-      <button class="btn btn-primary py-1 px-2 text-xs flex-1 justify-center" data-action="presetMyInspirations" data-id="${esc(a.id)}" title="基于赛道和热点生成预设选题">
-        <i data-lucide="lightbulb" class="w-3 h-3"></i>生成预设选题
+      <button class="btn btn-primary py-1 px-2 text-xs flex-1 justify-center" data-action="presetMyInspirations" data-id="${esc(a.id)}" title="基于赛道生成自动选题配置（cron 每天自动跑）">
+        <i data-lucide="lightbulb" class="w-3 h-3"></i>创建自动选题
       </button>
       <button class="btn btn-ghost py-1 px-2 text-xs" data-action="editMyAccount" data-id="${esc(a.id)}" title="编辑">
         <i data-lucide="pencil" class="w-3 h-3"></i>
@@ -301,22 +301,22 @@ export async function viewMyStyle(el, d) {
 }
 
 export async function presetMyInspirations(el, d) {
-  // 找到对应按钮，进入 loading 状态
+  // 改名为"创建自动选题配置"
   const btn = document.querySelector(`[data-action="presetMyInspirations"][data-id="${CSS.escape(d.id)}"]`);
   const originalHtml = btn?.innerHTML;
   if (btn) {
     btn.disabled = true;
     btn.classList.add('opacity-60', 'pointer-events-none');
-    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>生成中…';
+    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>建议中…';
     initIcons(btn);
   }
   try {
-    const ideas = await localApi(`my-accounts/${encodeURIComponent(d.id)}/preset-inspirations`, { method: 'POST' });
-    if (!ideas?.length) {
-      toast('未能生成选题（LLM 返回为空），请确认赛道已提炼', 'error');
+    const suggestions = await localApi(`my-accounts/${encodeURIComponent(d.id)}/suggest-configs`);
+    if (!suggestions?.length) {
+      toast('未能生成建议，请确认赛道已提炼', 'error');
       return;
     }
-    showPresetInspirationsModal(d.id, ideas);
+    showAutoConfigModal(d.id, suggestions);
   } catch (e) {
     toast(`生成失败：${e.message}`, 'error');
   } finally {
@@ -329,70 +329,72 @@ export async function presetMyInspirations(el, d) {
   }
 }
 
-function showPresetInspirationsModal(accountId, ideas) {
-  window._presetIdeas = ideas;
-  window._presetAccountId = accountId;
+function showAutoConfigModal(accountId, suggestions) {
+  window._autoCfgSuggestions = suggestions;
+  window._autoCfgAccountId = accountId;
   const modal = document.createElement('div');
   modal.className = 'modal-mask';
-  modal.innerHTML = `<div class="modal flex flex-col" style="max-width:720px;max-height:85vh" data-action="stopPropagation">
-    <div class="flex items-center justify-between mb-3 flex-shrink-0 px-1">
-      <h2 class="text-lg font-bold">预设选题（${ideas.length}）</h2>
+  modal.innerHTML = `<div class="modal flex flex-col" style="max-width:680px;max-height:85vh" data-action="stopPropagation">
+    <div class="flex items-center justify-between mb-2 flex-shrink-0 px-1">
+      <div>
+        <h2 class="text-lg font-bold">创建自动选题配置</h2>
+        <div class="text-[11px] text-gray-500 mt-0.5">勾选要创建的配置，cron 将按计划自动生成灵感入库</div>
+      </div>
       <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
     <div class="overflow-y-auto scrollbar-thin flex-1 min-h-0 space-y-2 pr-1">
-      ${ideas.map((idea, i) => `
-        <label class="flex items-start gap-2 p-3 bg-white/[0.02] rounded-lg cursor-pointer hover:bg-white/[0.04]">
-          <input type="checkbox" class="preset-idea-check mt-1" data-idx="${i}" checked>
-          <div class="flex-1 min-w-0">
-            <div class="font-medium text-sm">${esc(idea.title || '')}</div>
-            ${idea.angle ? `<div class="text-[11px] text-gray-500 mt-1">角度：${esc(idea.angle)}</div>` : ''}
-            ${idea.platform && idea.platform !== 'all' ? `<div class="text-[10px] text-purple-300 mt-1">${esc(platName(idea.platform))}</div>` : ''}
+      ${suggestions.map((cfg, i) => `
+        <label class="block p-3 bg-white/[0.02] rounded-lg cursor-pointer hover:bg-white/[0.04] border border-white/5">
+          <div class="flex items-start gap-2">
+            <input type="checkbox" class="auto-cfg-check mt-1" data-idx="${i}" checked>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm">${esc(cfg.name)}</div>
+              <div class="text-[11px] text-gray-500 mt-1">关键词：${cfg.keywords.map(k => `<span class="tag">${esc(k)}</span>`).join(' ')}</div>
+              <div class="text-[10px] text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
+                ${cfg.targetPlatforms?.length ? `<span>平台：${cfg.targetPlatforms.map(p => platName(p)).join('、')}</span>` : ''}
+                <span>每次 ${cfg.ideaCount} 条</span>
+                <span>源：${cfg.sources.length} 个</span>
+              </div>
+            </div>
           </div>
         </label>`).join('')}
     </div>
     <div class="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/5 flex-shrink-0">
-      <div class="text-[11px] text-gray-500">已勾选 <span id="preset-check-count">${ideas.length}</span> / ${ideas.length}</div>
+      <div class="text-[11px] text-gray-500">已勾选 <span id="auto-cfg-count">${suggestions.length}</span> / ${suggestions.length}（每天 9:00 自动跑）</div>
       <div class="flex gap-2">
-        <button class="btn btn-ghost py-1.5 text-xs" data-action="closeModal">关闭</button>
-        <button class="btn btn-primary py-1.5 text-xs" data-action="addPresetToInspirations"><i data-lucide="plus" class="w-3 h-3"></i>添加到灵感库</button>
+        <button class="btn btn-ghost py-1.5 text-xs" data-action="closeModal">取消</button>
+        <button class="btn btn-primary py-1.5 text-xs" data-action="createAutoConfigs"><i data-lucide="plus" class="w-3 h-3"></i>创建配置</button>
       </div>
     </div>
   </div>`;
   document.body.appendChild(modal);
   initIcons(modal);
-  // 实时更新计数
-  modal.querySelectorAll('input.preset-idea-check').forEach(cb => {
+  modal.querySelectorAll('input.auto-cfg-check').forEach(cb => {
     cb.addEventListener('change', () => {
-      const checked = modal.querySelectorAll('input.preset-idea-check:checked').length;
-      const countEl = modal.querySelector('#preset-check-count');
+      const checked = modal.querySelectorAll('input.auto-cfg-check:checked').length;
+      const countEl = modal.querySelector('#auto-cfg-count');
       if (countEl) countEl.textContent = checked;
     });
   });
 }
 
-export async function addPresetToInspirations() {
-  const checked = Array.from(document.querySelectorAll('input.preset-idea-check:checked')).map(cb => Number(cb.dataset.idx));
-  if (!checked.length) { toast('请至少勾选 1 条选题', 'error'); return; }
-  const ideas = (window._presetIdeas || []).filter((_, i) => checked.includes(i));
+export async function createAutoConfigs() {
+  const checked = Array.from(document.querySelectorAll('input.auto-cfg-check:checked')).map(cb => Number(cb.dataset.idx));
+  if (!checked.length) { toast('请至少勾选 1 个配置', 'error'); return; }
+  const suggestions = (window._autoCfgSuggestions || []).filter((_, i) => checked.includes(i));
+  const accountId = window._autoCfgAccountId;
   try {
-    // 调用现有的 inspirations POST 端点
-    for (const idea of ideas) {
-      await localApi('inspirations', {
+    let created = 0;
+    for (const suggestion of suggestions) {
+      await localApi(`my-accounts/${encodeURIComponent(accountId)}/create-config`, {
         method: 'POST',
-        body: {
-          title: idea.title,
-          summary: idea.angle || '',
-          angle: '预设',
-          targetPlatform: idea.platform === 'all' ? '' : idea.platform,
-          sourceMode: 'llm-reasoning',
-          sourceKeywords: [],
-          sourceItems: [],
-        },
+        body: { suggestion },
       });
+      created++;
     }
-    toast(`已添加 ${ideas.length} 条到灵感库`, 'success');
+    toast(`已创建 ${created} 个自动选题配置（每天 9:00 自动生成灵感）`, 'success');
     document.querySelector('.modal-mask')?.remove();
   } catch (e) {
-    toast(`添加失败：${e.message}`, 'error');
+    toast(`创建失败：${e.message}`, 'error');
   }
 }

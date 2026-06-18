@@ -1202,6 +1202,63 @@ async function generatePresetInspirations(account) {
   })).filter(idea => idea.title);
 }
 
+// 基于账号赛道生成"自动选题配置"建议（关键词组合 + 推荐数据源）
+async function suggestInspirationConfigs(account) {
+  const tracks = account.tracks || [];
+  if (!tracks.length) throw new Error('请先提炼赛道');
+  const platformMap = { gzh: 'gzh', dy: 'dy', xhs: 'xhs' };
+  const defaultPlatform = platformMap[account.plat] || '';
+  const messages = [
+    {
+      role: 'system',
+      content: `你是自媒体运营策略师。基于用户的赛道标签，生成 3 个"自动选题主题配置"建议。每个配置会作为定时任务，每天自动生成灵感选题入库。
+
+每个配置包含：
+- name：主题名称（10 字以内，如"AI 工具速递"、"NAS 折腾日记"）
+- keywords：3-6 个关键词（用于检索证据 + LLM 推理）
+- targetPlatforms：目标平台数组（可选：dy/xhs/gzh）
+- sources：推荐数据源（可选：hot/dy/xhs/gzh/ai-gzh/ai-bili/ai-xhs/tracked/gzh-search/wersss）
+- ideaCount：每次生成几条选题（3-8）
+
+严格输出 JSON：{"configs": [{"name": "...", "keywords": [...], "targetPlatforms": [...], "sources": [...], "ideaCount": N}]}`,
+    },
+    {
+      role: 'user',
+      content: `我的赛道：${tracks.join('、')}
+我的主平台：${account.plat === 'gzh' ? '公众号' : account.plat === 'dy' ? '抖音' : account.plat === 'xhs' ? '小红书' : account.plat}
+
+请生成 3 个互补的自动选题配置建议。`,
+    },
+  ];
+  const result = await callLlmJson(messages);
+  const configs = Array.isArray(result) ? result : (result?.configs || []);
+  return configs.map(c => ({
+    name: String(c?.name || '').slice(0, 20).trim(),
+    keywords: Array.isArray(c?.keywords) ? c.keywords.slice(0, 8).map(k => String(k).trim()).filter(Boolean) : [],
+    targetPlatforms: Array.isArray(c?.targetPlatforms) ? c.targetPlatforms.filter(p => ['dy', 'xhs', 'gzh'].includes(p)) : (defaultPlatform ? [defaultPlatform] : []),
+    sources: Array.isArray(c?.sources) ? c.sources.filter(s => INSPIRATION_SOURCE_KEYS.has(s)) : DEFAULT_INSPIRATION_SOURCES,
+    ideaCount: Math.min(8, Math.max(3, Number(c?.ideaCount) || 5)),
+  })).filter(c => c.name && c.keywords.length);
+}
+
+// 把建议保存为真实的自动选题配置
+function createInspirationConfigFromSuggestion(account, suggestion) {
+  const name = `${suggestion.name}`;
+  const config = {
+    name,
+    domain: (account.tracks || []).join('、'),
+    targetPlatforms: suggestion.targetPlatforms,
+    cronExpr: '0 9 * * *',  // 默认每天 9 点
+    enabled: 1,
+    sources: suggestion.sources,
+    ideaCount: suggestion.ideaCount,
+    evidenceLimit: 20,
+    dailyApiBudget: 3,
+    searchMode: 'combined',
+  };
+  return saveInspirationConfig(config);
+}
+
 function publicUser(row) {
   if (!row) return null;
   return {
@@ -3460,6 +3517,7 @@ async function rewriteForPlatform(body) {
   if (!text) throw new Error('请输入原文');
   const platform = String(body.platform || '小红书');
   const tone = String(body.tone || '专业、清晰、有观点');
+  const mode = String(body.mode || 'rewrite');  // create / rewrite / adapt
   const hotspot = body.hotspot && typeof body.hotspot === 'object' ? {
     title: String(body.hotspot.title || '').slice(0, 200),
     platformName: String(body.hotspot.platformName || '').slice(0, 30),
@@ -3468,6 +3526,17 @@ async function rewriteForPlatform(body) {
   const hotspotInstruction = hotspot?.title
     ? `选定热点：${hotspot.title}（${hotspot.platformName}）。可用关联角度：${hotspot.angle || '自行判断'}。热点主要用于标题和前言，正文不得为了关联而篡改原文事实；若关联牵强，应在标题和前言中弱化处理。`
     : '未选择热点，不要虚构或强行加入热点。';
+  // 平台对应的 rewrite skill 映射
+  const skillSlugMap = { '小红书': 'xiaohongshu-rewrite', '公众号': 'wechat-rewrite', '知乎': 'zhihu-rewrite' };
+  const skillSlug = skillSlugMap[platform];
+  let skillInstruction = '';
+  if (skillSlug) {
+    const skill = getSkill(skillSlug);
+    if (skill?.description) {
+      // 取 description 前 300 字作为方法论提示
+      skillInstruction = `\n\n参考 RedFox ${skillSlug} skill 方法论（按此风格输出）：\n${String(skill.description).slice(0, 400)}`;
+    }
+  }
   // 风格档案（来自「我的」账号）
   let styleInstruction = '';
   if (body.styleProfile && typeof body.styleProfile === 'object') {
@@ -3482,10 +3551,16 @@ async function rewriteForPlatform(body) {
     if (p['创作边界']?.length) bits.push(`避免：${p['创作边界'].join('、')}`);
     if (bits.length) styleInstruction = `\n\n参考风格档案（仅作为风格指引，不得编造新事实）：\n${bits.join('\n')}`;
   }
+  // 模式不同，system prompt 不同
+  const modeInstruction = mode === 'create'
+    ? `基于给定主题/大纲创作一篇全新的${platform}内容，可以适当发挥但要遵守事实底线。`
+    : mode === 'adapt'
+      ? `直接把素材改写为${platform}风格（不补充新事实，仅风格转换、句式重组）。`
+      : `将素材重构为${platform}内容（在原素材基础上扩展结构和打磨）。`;
   const result = await callLlmJson([
     {
       role: 'system',
-      content: `你是中文自媒体编辑。将素材重构为${platform}内容，风格：${tone}。只能改写原始素材和所选热点明确提供的信息，不得补充原文没有的功能细节、原因、监管结论、时间表、数据或品牌案例；素材较短时正文也应保持简短。热点只用于标题和前言的自然切入，不能借热点编造正文事实。输出严格 JSON：{"title":"","intro":"","content":""}。title 是成稿标题，intro 是独立前言，content 是不重复标题和前言的正文。${styleInstruction}`,
+      content: `你是中文自媒体编辑。${modeInstruction}风格：${tone}。只能改写原始素材和所选热点明确提供的信息，不得补充原文没有的功能细节、原因、监管结论、时间表、数据或品牌案例；素材较短时正文也应保持简短。热点只用于标题和前言的自然切入，不能借热点编造正文事实。输出严格 JSON：{"title":"","intro":"","content":""}。title 是成稿标题，intro 是独立前言，content 是不重复标题和前言的正文。${skillInstruction}${styleInstruction}`,
     },
     {
       role: 'user',
@@ -6256,6 +6331,31 @@ ${keywordsList}
       const ideas = await generatePresetInspirations(account);
       json(res, 200, { ok: true, data: ideas });
     } catch (e) { json(res, 500, { ok: false, error: e.message }); }
+    return true;
+  }
+  // GET /api/_/my-accounts/{id}/suggest-configs  LLM 生成自动选题配置建议
+  const suggestCfgMatch = url.pathname.match(/^\/api\/_\/my-accounts\/([^/]+)\/suggest-configs$/);
+  if (suggestCfgMatch && req.method === 'GET') {
+    const id = decodeURIComponent(suggestCfgMatch[1]);
+    const account = getMyAccount(id);
+    if (!account) { json(res, 404, { ok: false, error: '账号不存在' }); return true; }
+    try {
+      const suggestions = await suggestInspirationConfigs(account);
+      json(res, 200, { ok: true, data: suggestions });
+    } catch (e) { json(res, 500, { ok: false, error: e.message }); }
+    return true;
+  }
+  // POST /api/_/my-accounts/{id}/create-config  基于建议创建真实配置
+  const createCfgMatch = url.pathname.match(/^\/api\/_\/my-accounts\/([^/]+)\/create-config$/);
+  if (createCfgMatch && req.method === 'POST') {
+    const id = decodeURIComponent(createCfgMatch[1]);
+    const account = getMyAccount(id);
+    if (!account) { json(res, 404, { ok: false, error: '账号不存在' }); return true; }
+    const { data } = await readBody(req);
+    try {
+      const config = createInspirationConfigFromSuggestion(account, data.suggestion || data);
+      json(res, 200, { ok: true, data: config });
+    } catch (e) { json(res, 400, { ok: false, error: e.message }); }
     return true;
   }
 
