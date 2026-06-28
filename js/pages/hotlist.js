@@ -21,17 +21,11 @@ export function clearHotPlatforms() {
 async function loadHotPlatforms() {
   if (hotPlatforms.length) return hotPlatforms;
   try {
-    hotPlatforms = await localApi('hot/platforms');
+    const data = await localApi('hot/platforms');
+    hotPlatforms = Array.isArray(data) ? data : [];
   } catch (e) {
     console.warn('加载热榜 platform 列表失败:', e.message);
-    hotPlatforms = [
-      { key: 'dy', label: '抖音 TOP50' },
-      { key: 'xhs', label: '小红书 TOP50' },
-      { key: 'gzh', label: '公众号热门' },
-      { key: 'ai-gzh', label: 'AI 公众号' },
-      { key: 'ai-bili', label: 'AI B站' },
-      { key: 'ai-xhs', label: 'AI 小红书' },
-    ];
+    hotPlatforms = []; // TOP50 默认关闭，需要去 Skills 中心绑定才显示
   }
   return hotPlatforms;
 }
@@ -74,12 +68,12 @@ export async function renderHotlist() {
       top.innerHTML = kwResult.slice(0, 12).map((kw, i) => {
         const plats = kw.raw?.plats || [];
         return `
-        <div class="flex-shrink-0 w-36 flex items-center gap-1.5 px-2 py-1.5 bg-white/[0.02] rounded-lg card border border-white/5">
+        <div class="flex items-center gap-2 p-2 bg-white/[0.02] rounded-lg card border border-white/5">
           ${rankBadge(i + 1)}
           <div class="flex-1 min-w-0">
             <div class="text-xs font-medium truncate leading-tight">${esc(kw.title)}</div>
-            <div class="flex items-center gap-1 mt-0.5 text-[9px] text-gray-500">
-              ${plats.slice(0, 3).map(p => `<span class="flex items-center gap-0.5"><span class="platform-dot" style="background:${platColor(platCodeByName(p))}"></span></span>`).join(' ')}
+            <div class="flex items-center gap-1 mt-0.5 text-[9px] text-gray-500 flex-wrap">
+              ${plats.slice(0, 4).map(p => `<span class="flex items-center gap-0.5"><span class="platform-dot" style="background:${platColor(platCodeByName(p))}"></span>${esc(p)}</span>`).join(' ')}
             </div>
           </div>
         </div>`;
@@ -104,7 +98,7 @@ export async function renderHotlist() {
   if (!top.isConnected) return;
   await renderHotTabs();
   if (!top.isConnected) return;
-  await renderHotTab('dy');
+  await renderHotTab('trending-hub');
   if (!top.isConnected) return;
   await loadHotTrends();
   if (!top.isConnected) return;
@@ -140,6 +134,36 @@ export async function renderHotTab(tab) {
   const content = document.getElementById('hot-tab-content');
   const metaEl = document.getElementById('hot-tab-meta');
   if (!content || !metaEl) return;
+
+  // 特殊：全网聚合 tab 直接复用 top 区域的关键词数据
+  if (tab === 'trending-hub') {
+    if (!hotCache.hotKeyword) {
+      try { hotCache.hotKeyword = await localApi('hot/keywords'); } catch {}
+    }
+    const kw = hotCache.hotKeyword || [];
+    metaEl.innerHTML = `<div class="text-[11px] text-gray-400">基于 hourly 收录的 7 大平台热搜数据聚合 · 共 ${kw.length} 条</div>`;
+    if (!kw.length) {
+      content.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">暂无热点数据，<button class="text-pink-400 underline" data-action="syncHotKeywords">立即刷新</button></div>';
+      initIcons(content);
+      return;
+    }
+    content.innerHTML = kw.map((item, i) => {
+      const plats = item.raw?.plats || [];
+      return `
+        <div class="flex items-center gap-3 p-2.5 bg-white/[0.02] rounded-lg card border border-white/5">
+          ${rankBadge(i + 1)}
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">${esc(item.title)}</div>
+            <div class="flex items-center gap-1 mt-0.5 text-[10px] text-gray-500 flex-wrap">
+              ${plats.slice(0, 6).map(p => `<span class="flex items-center gap-0.5"><span class="platform-dot" style="background:${platColor(platCodeByName(p))}"></span>${esc(p)}</span>`).join(' ')}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    initIcons(content);
+    return;
+  }
+
   content.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">加载中…</div>';
   metaEl.innerHTML = '';
   cancelApi('hotlist-tab');

@@ -813,7 +813,7 @@ let wersssQrTimer = null;
 export async function renderWersss() {
   try {
     const status = await localApi('wersss/status');
-    if (status.configured && status.enabled && !status.wxAuthorized) {
+    if (status.configured && status.enabled && (!status.wxAuthorized || status.tokenExpired)) {
       await showWersssQrModal(status);
       return;
     }
@@ -822,6 +822,16 @@ export async function renderWersss() {
   }
   await Promise.all([loadWersssStatus(), loadWersssSubs(), loadWersssArticles()]);
   bindWersssSearch();
+}
+
+// 强制弹出扫码授权窗口（"重新授权"按钮调用）
+export async function forceWersssQr() {
+  try {
+    const status = await localApi('wersss/status');
+    await showWersssQrModal(status);
+  } catch (e) {
+    console.warn('打开 WeRss 扫码失败:', e.message);
+  }
 }
 
 async function showWersssQrModal(status) {
@@ -860,28 +870,25 @@ export function closeWersssQrModal() {
 
 export async function refreshWersssQr() {
   try {
-    const { data } = await localApi('wersss/qr/start', { method: 'POST' });
-    const imgSrc = data?.qrUrl || '';
+    const { data, error } = await localApi('wersss/qr/start', { method: 'POST' });
+    if (error) throw new Error(error);
+    // 用同域代理 URL，避免跨域 Opaque Response Blocking
+    const imgSrc = '/api/_/wersss/qr/proxy';
     const placeholder = document.getElementById('wersss-qr-img-placeholder');
     const existingImg = document.querySelector('#wersss-qr-modal img');
-    if (imgSrc) {
-      if (existingImg) {
-        existingImg.src = imgSrc;
-      } else if (placeholder) {
-        const img = document.createElement('img');
-        img.src = imgSrc;
-        img.alt = 'WeRss 授权二维码';
-        img.className = 'rounded-lg border border-white/10';
-        img.style = 'max-width:280px';
-        placeholder.replaceWith(img);
-      }
+    if (existingImg) {
+      existingImg.src = imgSrc;
     } else if (placeholder) {
-      placeholder.textContent = '二维码加载失败，请刷新';
+      const img = document.createElement('img');
+      img.src = imgSrc;
+      img.alt = 'WeRss 授权二维码';
+      img.className = 'rounded-lg border border-white/10';
+      img.style = 'max-width:280px';
+      placeholder.replaceWith(img);
     }
   } catch (e) {
     const placeholder = document.getElementById('wersss-qr-img-placeholder');
     if (placeholder) placeholder.textContent = '二维码加载失败，请刷新';
-    console.warn('[wersss] 刷新 QR 失败:', e.message);
   }
 }
 
@@ -889,15 +896,16 @@ function startWersssQrPolling() {
   if (wersssQrTimer) clearInterval(wersssQrTimer);
   wersssQrTimer = setInterval(async () => {
     try {
-      const { data: status } = await localApi('wersss/status');
-      const text = document.getElementById('wersss-qr-status-text');
-      if (status.wxAuthorized) {
-        if (text) text.textContent = '授权成功，即将刷新…';
-        setTimeout(() => { closeWersssQrModal(); renderWersss(); }, 1000);
-      } else if (text) {
-        text.textContent = '等待扫码…';
+      const { data: status, error } = await localApi('wersss/status');
+      if (error || !status) return;
+      const statusText = document.getElementById('wersss-qr-status-text');
+      if (!status.wxAuthorized) {
+        if (statusText) statusText.textContent = '等待扫码…';
+        return;
       }
-    } catch (e) { console.warn('轮询 WeRss 状态失败:', e.message); }
+      if (statusText) statusText.textContent = '授权成功，即将刷新…';
+      setTimeout(() => { closeWersssQrModal(); renderWersss(); }, 1000);
+    } catch (e) { /* ignore */ }
   }, 3000);
 }
 
@@ -923,9 +931,18 @@ async function loadWersssStatus() {
     if (!cfg.configured) {
       dot.className = 'inline-block w-2 h-2 rounded-full bg-gray-500 mr-1.5';
       text.textContent = '未配置';
+      return;
     } else if (!cfg.enabled) {
       dot.className = 'inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5';
       text.textContent = `已停用 · ${cfg.baseUrl}`;
+      return;
+    }
+    // 也拿 status 看 token 是否过期
+    const status = await localApi('wersss/status');
+    if (status.tokenExpired) {
+      dot.className = 'inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5';
+      const exp = status.tokenExpiresAt ? new Date(status.tokenExpiresAt).toLocaleString('zh-CN') : '';
+      text.textContent = `Token 已过期 ${exp ? '· ' + exp : ''}`;
     } else {
       dot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5';
       text.textContent = `${cfg.username} @ ${cfg.baseUrl}`;

@@ -242,19 +242,37 @@ async function qrCode(baseUrl, token) {
   return '';
 }
 
-// 启动一次微信扫码授权：触发 QR 生成 + 等服务端把文件准备好再返回 URL。
-// 前端只应在「打开二维码弹窗」时调用一次，**不要在轮询里反复调**。
+// 启动一次微信扫码授权：触发 QR 生成 + 等微信扫码确认完成。
+// 返回 QR 图片 URL，前端展示给用户扫描。
+// 扫描完成后 WeRss 内部会通过 Timer 检测并保存新 token 到 wx.lic。
+// 前端只应在「打开弹窗」时调用一次。
 async function startWersssAuth(baseUrl, token, opts = {}) {
-  const maxWaitMs = opts.maxWaitMs || 8000;
+  const maxWaitQrMs = opts.maxWaitQrMs || 8000;
   const intervalMs = opts.intervalMs || 400;
   await triggerQrCreate(baseUrl, token);
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
+
+  // 第一阶段：等 QR 图片生成
+  const qrDeadline = Date.now() + maxWaitQrMs;
+  while (Date.now() < qrDeadline) {
     const path = await qrImage(baseUrl, token);
     if (path) return path;
     await new Promise(r => setTimeout(r, intervalMs));
   }
   return '';
+}
+
+// 等扫码完成：轮询 qrStatus 直到 login_status=true（扫码成功并已保存 token）
+// maxWaitMs 可设大一些（默认 5 分钟），因为用户需要用手机扫描并在微信里确认。
+async function waitQrLoginComplete(baseUrl, token, opts = {}) {
+  const maxWaitMs = opts.maxWaitMs || 300000;
+  const intervalMs = opts.intervalMs || 2000;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const status = await qrStatus(baseUrl, token);
+    if (status?.login_status === true) return true;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
 }
 
 module.exports = {
@@ -269,6 +287,7 @@ module.exports = {
   qrImage,
   qrCode,
   startWersssAuth,
+  waitQrLoginComplete,
   wersssFetch,
   unwrap,
   extractList,

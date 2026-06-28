@@ -21,7 +21,8 @@ WORKDIR /app
 
 # 先复制依赖文件，利用 Docker 层缓存
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production \
+ && npm install nodemon --no-save
 
 # 复制应用代码（bind mount 会覆盖个别文件用于热更新）
 COPY . .
@@ -34,4 +35,5 @@ VOLUME ["/data"]
 # 默认监听端口
 EXPOSE 8080
 
+# nodemon -L = 强制轮询模式，穿透 Docker bind mount 检测文件变化
 CMD ["node", "server.js"]

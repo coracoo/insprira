@@ -31,10 +31,12 @@ export async function renderSkills() {
   try {
     const skills = await loadSkills();
     document.getElementById('skill-local-count').textContent = `${skills.length} 个已下载`;
-    // 分类下拉固定使用 LLM 五类，不再随原始 category 变化
+    // 分类下拉固定使用 LLM 七类
     document.getElementById('skillCategory').innerHTML = [
       '<option value="all">全部分类</option>',
       '<option value="热点">热点</option>',
+      '<option value="帐号">帐号</option>',
+      '<option value="信息源">信息源</option>',
       '<option value="创作">创作</option>',
       '<option value="分析">分析</option>',
       '<option value="检索">检索</option>',
@@ -52,14 +54,16 @@ export function filterSkills() {
   if (!grid) return;
   const keyword = document.getElementById('skillSearch')?.value.trim().toLowerCase() || '';
   const category = document.getElementById('skillCategory')?.value || 'all';
+  // 每个 skill 只用一个分类：llmCategory（后端已应用 override），fallback 才用 skill.category
+  // 排序：按 title 中文/英文首字母
   const filtered = skillCache.filter(skill => {
     const cat = skill.llmCategory || skill.category || '其他';
-    const matchesCategory = category === 'all' || cat === category || skill.category === category;
+    const matchesCategory = category === 'all' || cat === category;
     return matchesCategory && (!keyword || `${skill.title} ${skill.name} ${skill.description}`.toLowerCase().includes(keyword));
-  });
+  }).sort((a, b) => (a.title || a.name || '').localeCompare(b.title || b.name || '', 'zh-Hans-CN'));
   grid.innerHTML = filtered.map(skill => {
     const cat = skill.llmCategory || skill.category || '其他';
-    const catColor = { '热点': 'pill-hot', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '生成工具': 'pill-amber' }[cat] || 'pill-gray';
+    const catColor = { '热点': 'pill-hot', '帐号': 'pill-rose', '信息源': 'pill-cyan', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '生成工具': 'pill-amber' }[cat] || 'pill-gray';
     const bindable = skill.sourceBinding; // 后端配置了热榜映射即显示绑定按钮，不依赖 LLM 分类
     const bindBtn = bindable
       ? `<button class="btn ${skill.cronEnabled ? 'btn-ghost' : 'btn-primary'} py-1 text-[11px] flex-shrink-0" data-action="bindSkillToSource" data-slug="${esc(skill.slug)}" data-stop-propagation title="${skill.cronEnabled ? '已在热榜中' : '启用对应的定时任务'}">
@@ -102,6 +106,17 @@ export async function classifySkills() {
   try {
     const result = await localApi('skills/classify', { method: 'POST' });
     toast(`分类完成：${result.done}/${result.total} 成功${result.failed ? `，失败 ${result.failed}` : ''}`, 'success');
+    await loadSkills(true);
+    filterSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function forceReclassifySkills() {
+  if (!confirm('强制重新分析所有 skill（忽略缓存签名），耗时约 1-3 分钟，确认开始？')) return;
+  toast('正在强制重新分类所有 skill…', 'info');
+  try {
+    const result = await localApi('skills/classify?force=1', { method: 'POST' });
+    toast(`强制重分类完成：${result.done}/${result.total} 成功`, 'success');
     await loadSkills(true);
     filterSkills();
   } catch (e) { toast(e.message, 'error'); }

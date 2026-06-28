@@ -20,18 +20,29 @@ function bindPlatformSkillBadge() {
   const badge = document.getElementById('rewrite-skill-badge');
   if (!sel || !badge || sel.dataset.bound) return;
   sel.dataset.bound = '1';
-  const update = () => {
+  const update = async () => {
     const opt = sel.selectedOptions[0];
-    const slug = opt?.dataset.skill;
-    if (slug) {
-      badge.classList.remove('hidden');
+    const modeAttr = currentCreatorMode === 'create' ? 'data-skill-create' : 'data-skill-rewrite';
+    const slug = opt?.getAttribute(modeAttr) || opt?.dataset?.skill;
+    if (!slug) { badge.classList.add('hidden'); return; }
+    badge.classList.remove('hidden');
+    try {
+      const { data } = await localApi(`skills/${slug}`);
+      if (data?.description) {
+        badge.innerHTML = `<i data-lucide="book-open" class="w-2.5 h-2.5"></i> ${esc(data.description.substring(0, 60))}${data.description.length > 60 ? '…' : ''}`;
+      } else {
+        badge.innerHTML = `<i data-lucide="blocks" class="w-2.5 h-2.5"></i> ${slug}`;
+      }
+    } catch {
       badge.innerHTML = `<i data-lucide="blocks" class="w-2.5 h-2.5"></i> ${slug}`;
-      initIcons(badge);
-    } else {
-      badge.classList.add('hidden');
     }
+    initIcons(badge);
   };
   sel.addEventListener('change', update);
+  // 模式切换时也要更新 badge
+  document.querySelectorAll('.creator-mode-tab').forEach(btn => {
+    btn.addEventListener('click', update);
+  });
   update();
 }
 
@@ -302,7 +313,7 @@ export async function doRewrite() {
     document.getElementById('rewriteTitle').value = '';
     document.getElementById('rewriteIntro').value = '';
     resultEl.value = '';
-    toast(e.message + '，请在 .env 配置 LLM_API_KEY', 'error');
+    toast(e.message, 'error');
   }
 }
 
@@ -314,6 +325,30 @@ export function copyRewrite() {
   navigator.clipboard.writeText([title, intro, content].filter(Boolean).join('\n\n'))
     .then(() => toast('成稿已复制', 'success'))
     .catch(() => toast('复制失败', 'error'));
+}
+
+export async function exportToKb() {
+  const title = document.getElementById('rewriteTitle').value.trim();
+  const intro = document.getElementById('rewriteIntro').value.trim();
+  const content = document.getElementById('rewriteResult').value.trim();
+  if (!title && !content) { toast('还没有成稿可导出', 'error'); return; }
+  const fullContent = [intro, content].filter(Boolean).join('\n\n');
+  const target = document.getElementById('exportKbTarget')?.value || 'obsidian';
+  try {
+    const result = await localApi('kb/entries', {
+      method: 'POST',
+      body: { title: title || '无标题', tags: [], folder: '', content: fullContent, target },
+    });
+    if (result?.entry_key) {
+      toast(`已导出到 ${target === 'notion' ? 'Notion' : 'Obsidian'}`, 'success');
+    } else if (result?.error) {
+      toast('导出失败: ' + result.error, 'error');
+    } else {
+      toast('导出失败', 'error');
+    }
+  } catch (e) {
+    toast('导出失败: ' + e.message, 'error');
+  }
 }
 
 export async function generateCover() {

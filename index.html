@@ -276,11 +276,11 @@
       </div>
       <div class="flex items-center gap-2 text-[11px] text-gray-400" id="hot-top10-time">加载中…</div>
     </div>
-    <div class="flex gap-2 overflow-x-auto pb-2" id="hot-top10"></div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px" id="hot-top10"></div>
   </div>
   <div class="glass rounded-xl p-5">
     <div id="hot-tabs" class="flex items-center flex-wrap gap-1 mb-4 border-b border-white/5 -mx-5 px-5 pb-3">
-      <button class="tab-btn active px-3 py-1.5 text-sm rounded-md" data-tab="dy">抖音 TOP50</button>
+      <button class="tab-btn active px-3 py-1.5 text-sm rounded-md" data-tab="trending-hub">全网聚合</button>
     </div>
     <div id="hot-tab-meta" class="mb-3"></div>
     <div id="hot-tab-content" class="space-y-2"></div>
@@ -534,6 +534,7 @@
         </div>
         <div class="flex items-center gap-2">
           <button class="btn btn-ghost py-1.5 text-xs" data-action="openWersssConfig"><i data-lucide="settings" class="w-3.5 h-3.5"></i>配置</button>
+          <button class="btn btn-ghost py-1.5 text-xs" data-action="forceWersssQr"><i data-lucide="scan" class="w-3.5 h-3.5"></i>重新授权</button>
           <button class="btn btn-ghost py-1.5 text-xs" data-action="addWersssSub"><i data-lucide="plus" class="w-3.5 h-3.5"></i>添加订阅</button>
           <button class="btn btn-primary py-1.5 text-xs" data-action="syncWersss"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>立即同步</button>
           <button class="btn btn-ghost py-1.5 text-xs" data-action="prefetchWersss" title="批量抓取所有文章的正文（用于全文搜索）"><i data-lucide="download" class="w-3.5 h-3.5"></i>预抓正文</button>
@@ -613,13 +614,13 @@
         <h3 class="text-sm font-semibold mb-3">③ 多平台输出</h3>
         <div class="flex items-center gap-2 mb-3 flex-wrap">
           <select class="input py-1.5 text-xs" id="rewritePlatform" style="width:auto">
-            <option value="小红书" data-skill="xiaohongshu-rewrite">小红书</option>
-            <option value="公众号" data-skill="wechat-rewrite">公众号</option>
-            <option value="知乎" data-skill="zhihu-rewrite">知乎</option>
-            <option value="抖音" data-skill="multi-rewrite">抖音</option>
-            <option value="视频号" data-skill="multi-rewrite">视频号</option>
-            <option value="快手" data-skill="multi-rewrite">快手</option>
-            <option value="哔站" data-skill="multi-rewrite">哔站</option>
+            <option value="小红书" data-skill-create="xiaohongshu-write" data-skill-rewrite="xiaohongshu-rewrite">小红书</option>
+            <option value="公众号" data-skill-create="wechat-write" data-skill-rewrite="wechat-rewrite">公众号</option>
+            <option value="知乎" data-skill-create="zhihu-rewrite" data-skill-rewrite="zhihu-rewrite">知乎</option>
+            <option value="抖音" data-skill-create="multi-rewrite" data-skill-rewrite="multi-rewrite">抖音</option>
+            <option value="视频号" data-skill-create="multi-rewrite" data-skill-rewrite="multi-rewrite">视频号</option>
+            <option value="快手" data-skill-create="multi-rewrite" data-skill-rewrite="multi-rewrite">快手</option>
+            <option value="哔站" data-skill-create="multi-rewrite" data-skill-rewrite="multi-rewrite">哔站</option>
           </select>
           <span id="rewrite-skill-badge" class="pill pill-gray !text-[10px] !py-0.5 !px-1.5 hidden"></span>
           <select class="input py-1.5 text-xs" id="rewriteTone" style="width:auto">
@@ -657,7 +658,14 @@
             <textarea class="input min-h-[240px] resize-y text-sm leading-relaxed" id="rewriteResult" placeholder="生成结果会显示在这里"></textarea>
           </div>
         </div>
-        <button class="btn btn-ghost py-1.5 text-xs mt-2" data-action="copyRewrite"><i data-lucide="copy" class="w-3.5 h-3.5"></i>复制成稿</button>
+        <div class="flex gap-2 mt-2">
+          <button class="btn btn-ghost py-1.5 text-xs" data-action="copyRewrite"><i data-lucide="copy" class="w-3.5 h-3.5"></i>复制成稿</button>
+          <select id="exportKbTarget" class="input text-xs py-1" style="width:auto">
+            <option value="obsidian">→ Obsidian</option>
+            <option value="notion">→ Notion</option>
+          </select>
+          <button class="btn btn-ghost py-1.5 text-xs" data-action="exportToKb"><i data-lucide="book-plus" class="w-3.5 h-3.5"></i>导出知识库</button>
+        </div>
       </div>
       <div class="glass rounded-xl p-4">
         <h3 class="text-sm font-semibold mb-3">④ AI 封面</h3>
@@ -688,7 +696,8 @@
       <span class="text-[11px] text-gray-500" id="skill-update-status">正在检查更新…</span>
       <button class="btn btn-ghost py-1.5 text-xs" data-action="checkSkillUpdates"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>检查更新</button>
       <button class="btn btn-primary py-1.5 text-xs hidden" id="skill-update-button" data-action="updateCommunitySkills"><i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新</button>
-      <button class="btn btn-ghost py-1.5 text-xs" data-action="classifySkills" title="用 LLM 给所有 skill 自动分类"><i data-lucide="wand-2" class="w-3.5 h-3.5"></i>LLM 分类</button>
+      <button class="btn btn-ghost py-1.5 text-xs" data-action="classifySkills" title="只分析新增/变化的 skill"><i data-lucide="wand-2" class="w-3.5 h-3.5"></i>LLM 分类</button>
+      <button class="btn btn-ghost py-1.5 text-xs" data-action="forceReclassifySkills" title="强制重新分析所有 skill，忽略缓存"><i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>强制重分类</button>
       <span class="pill pill-green" id="skill-local-count">读取中…</span>
     </div>
   </div>

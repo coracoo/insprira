@@ -49,3 +49,14 @@ desktop.ini
 # 临时文件
 *.tmp
 *.bak
+
+# Python（none 在本项目用，留作占位）
+__pycache__/
+*.pyc
+*.pyo
+
+# 构建产物
+dist/
+build/
+*.min.js
+*.min.css.map

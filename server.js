@@ -204,14 +204,20 @@ const REDFOX_ENDPOINTS = new Set([
   'parseWork/queryKsAiMsgs/batch',
   'parseWork/querySphAiMsgs',
   'parseWork/queryPlayletMsgs',
+  'parseWork/queryBiliPlayletMsgs',
+  'parseWork/queryDyPlayletMsgs',
+  'parseWork/queryGzhPlayletMsgs',
+  'parseWork/queryXhsPlayletMsgs',
   'parseWork/parse',
   'parseWork/imageGen/submitSkill',
   'parseWork/imageGen/result',
   'parseWork/imageGen/uploadImage',
   'skill/record/save',
+  'doubaoSearch/submit',
+  'doubaoSearch/result',
 ]);
 
-const AI_FEED_PLATFORMS = ['ai-gzh', 'ai-bili', 'ai-xhs', 'ai-dy', 'ai-ks', 'ai-sph', 'playlet-dy', 'playlet-gzh'];
+const AI_FEED_PLATFORMS = ['ai-gzh', 'ai-bili', 'ai-xhs', 'ai-dy', 'ai-ks', 'ai-sph', 'playlet-dy', 'playlet-gzh', 'playlet-bili', 'playlet-xhs', 'cultural-tourism-bili', 'cultural-tourism-dy', 'cultural-tourism-gzh', 'cultural-tourism-xhs'];
 
 const CACHE_TTL = {
   'hotKeyword/list': 10 * 60 * 1000,
@@ -1644,8 +1650,61 @@ async function redfoxGetData(endpoint, queryParams = {}) {
   return payload.data;
 }
 
+// 豆包 WebSearch：提交搜索任务后轮询等待结果，最多等 60s
+async function doDoubaoWebSearch(query, source = 'insprira-rewrite') {
+  if (!API_KEY) throw new Error('未配置 REDFOX_API_KEY');
+  const submitResp = await redfoxRequest('doubaoSearch/submit', { inquiry_text: query, source });
+  const submitPayload = parseJson(submitResp.body);
+  if (submitResp.status >= 400 || !submitPayload || ![200, 2000].includes(submitPayload.code)) {
+    throw new Error(submitPayload?.msg || submitPayload?.message || `豆包搜索提交失败 HTTP ${submitResp.status}`);
+  }
+  const taskId = submitPayload?.data?.taskId || submitPayload?.data?.task_id;
+  if (!taskId) throw new Error('豆包搜索未返回 taskId');
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const resultResp = await redfoxRequest('doubaoSearch/result', { taskId });
+    const resultPayload = parseJson(resultResp.body);
+    if (resultResp.status >= 400) continue;
+    const data = resultPayload?.data || {};
+    const status = String(data.status || resultPayload?.status || '').toLowerCase();
+    if (status === 'completed' || status === 'success' || status === 'done') {
+      logApiUsage('doubaoSearch/result', 200, false);
+      return data;
+    }
+    if (status === 'failed' || status === 'error') {
+      logApiUsage('doubaoSearch/result', 200, false);
+      throw new Error(data.failReason || data.message || '豆包搜索任务失败');
+    }
+  }
+  logApiUsage('doubaoSearch/result', 200, false);
+  throw new Error('豆包搜索超时（已等待 60s），请稍后重试');
+}
+
+function formatDoubaoSearchResults(data) {
+  // 兼容多种返回结构：{ answer, results: [{title, url, snippet}] } 或 { content } 或直接 { results: [...] }
+  const results = Array.isArray(data?.results) ? data.results : (Array.isArray(data?.web_results) ? data.web_results : []);
+  const answer = data?.answer || data?.summary || data?.content || '';
+  let text = '';
+  if (answer) text += `【AI 总结】\n${String(answer).slice(0, 1500)}\n\n`;
+  if (results.length) {
+    text += `【搜索结果】\n`;
+    results.slice(0, 8).forEach((r, i) => {
+      const title = r.title || r.name || '';
+      const url = r.url || r.link || '';
+      const snippet = r.snippet || r.content || r.description || '';
+      if (title || snippet) {
+        text += `${i + 1}. ${title}${url ? ` (${url})` : ''}\n${String(snippet).slice(0, 300)}\n\n`;
+      }
+    });
+  }
+  if (!text) text = JSON.stringify(data).slice(0, 2000);
+  return text.slice(0, 4000);
+}
+
 function parseSkillFile(skillPath) {
-  const content = fs.readFileSync(skillPath, 'utf8');
+  let content = fs.readFileSync(skillPath, 'utf8');
+  // 去掉 UTF-8 BOM（部分 SKILL.md 文件头有 BOM，导致 frontmatter 正则匹配失败）
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
   const frontmatter = content.match(/^---\s*\n([\s\S]*?)\n---/);
   const metadata = {};
   if (frontmatter) {
@@ -1704,7 +1763,17 @@ function skillUpdateState() {
   return { ...state, newSlugs };
 }
 
-const LLM_SKILL_CATEGORIES = ['热点', '创作', '分析', '检索', '生成工具'];
+const LLM_SKILL_CATEGORIES = ['热点', '帐号', '信息源', '创作', '分析', '检索', '生成工具'];
+
+// 硬编码 LLM 分类覆盖：优先于 LLM 结果，用于修已知误分类
+const LLM_CATEGORY_OVERRIDES = {
+  'douyin-works-crawler': '检索',     // 抖音作品爬取 → 数据抓取工具，不是榜单
+  'douyin-search': '检索',             // 抖音搜索 → 搜索工具
+  'playlet-bili-feed': '信息源',       // B站短剧信息源 → 内容聚合源
+  'multi-rewrite': '创作',             // 多平台改写 → 内容创作工具
+  'image-gen': '生成工具',             // 图片生成 → 媒体生成工具
+  // ai-intelligence-investigator LLM 分类为 检索 是正确的，不覆盖
+};
 
 // Skill → 灵感熔炉 source 映射（"绑定到热榜"按钮用的）
 // 仅映射已被灵感熔炉支持的 source；未映射的 skill 即使分类为热点也不会显示绑定按钮
@@ -1723,6 +1792,13 @@ const SKILL_TO_SOURCE = {
   // 短剧信息源
   'playlet-douyin-feed':  { sourceKey: 'playlet-dy',  label: '短剧抖音',    cronId: 'hot-daily-playlet-dy' },
   'playlet-wechat-feed':  { sourceKey: 'playlet-gzh', label: '短剧公众号',  cronId: 'hot-daily-playlet-gzh' },
+  'playlet-bili-feed':       { sourceKey: 'playlet-bili', label: '短剧B站',     cronId: 'hot-daily-playlet-bili' },
+  'playlet-xiaohongshu-feed': { sourceKey: 'playlet-xhs', label: '短剧小红书',  cronId: 'hot-daily-playlet-xhs' },
+  // 文旅信息源
+  'cultural-tourism-bilibili-feed':    { sourceKey: 'cultural-tourism-bili', label: '文旅B站',    cronId: 'hot-daily-cultural-tourism-bili' },
+  'cultural-tourism-douyin-feed':      { sourceKey: 'cultural-tourism-dy',  label: '文旅抖音',    cronId: 'hot-daily-cultural-tourism-dy' },
+  'cultural-tourism-wechat-feed':      { sourceKey: 'cultural-tourism-gzh', label: '文旅公众号',  cronId: 'hot-daily-cultural-tourism-gzh' },
+  'cultural-tourism-xiaohongshu-feed': { sourceKey: 'cultural-tourism-xhs', label: '文旅小红书',  cronId: 'hot-daily-cultural-tourism-xhs' },
 };
 
 function getSkillSourceBinding(slug) {
@@ -1767,11 +1843,13 @@ async function classifySkill(skill, retries = 3) {
   const messages = [
     {
       role: 'system',
-      content: `你是一个 Skill 分类器。根据 skill 信息把它归入以下五类之一：
-- 热点：抓取/聚合某个主题的内容榜单、热榜、信息源
+      content: `你是一个 Skill 分类器。根据 skill 信息把它归入以下七类之一：
+- 热点：抓取/聚合某个主题的内容榜单、热榜、趋势追踪（无明确归属账号/平台）
+- 帐号：热门账号榜单、推荐账号、黑马账号、账号排行（如"公众号大V"）
+- 信息源：按主题/标签/关键词聚合的内容源（如"AI 公众号信息源"、"内容出海信息源"）
 - 创作：辅助内容创作的工具（如文案改写、风格转换、标题生成）
 - 分析：分析账号/内容/数据的工具（如账号诊断、爆款分析、趋势分析）
-- 检索：搜索关键词/账号/文章的工具
+- 检索：搜索关键词/账号/文章/作品的工具（如关键词搜索、内容爬取）
 - 生成工具：生成图片/视频/封面等媒体内容的工具
 
 严格只输出：<slug>:<类别>（无空格，无其他内容）。禁止输出平台名、解释、XML 标签。`,
@@ -1796,6 +1874,8 @@ async function classifySkill(skill, retries = 3) {
         }
       }
       if (LLM_SKILL_CATEGORIES.includes(category)) {
+        // 硬编码 override 优先
+        const finalCategory = LLM_CATEGORY_OVERRIDES[skill.slug] || category;
         const now = Date.now();
         db.prepare(`
           INSERT INTO skill_classifications (slug, llm_category, original_category, analyzed_at, skill_signature)
@@ -1805,8 +1885,8 @@ async function classifySkill(skill, retries = 3) {
             original_category = excluded.original_category,
             analyzed_at = excluded.analyzed_at,
             skill_signature = excluded.skill_signature
-        `).run(skill.slug, category, skill.category, now, signature);
-        return category;
+        `).run(skill.slug, finalCategory, skill.category, now, signature);
+        return finalCategory;
       }
       console.warn(`[skill] LLM 输出非法类别 ${skill.slug}: ${category}`);
       break;
@@ -1826,13 +1906,16 @@ async function classifySkill(skill, retries = 3) {
 }
 
 // 批量分类：一次 LLM 调用完成所有 skill，避免逐个调用触发限速
-async function classifyAllSkills(skills) {
+async function classifyAllSkills(skills, options = {}) {
   if (!skills.length) return 0;
+  const force = options.force === true;
   const needsClassify = [];
   for (const skill of skills) {
     const signature = `${skill.slug}|${skill.title}|${String(skill.description || '').slice(0, 200)}`;
-    const existing = db.prepare('SELECT * FROM skill_classifications WHERE slug = ?').get(skill.slug);
-    if (existing && existing.skill_signature === signature) continue;
+    if (!force) {
+      const existing = db.prepare('SELECT * FROM skill_classifications WHERE slug = ?').get(skill.slug);
+      if (existing && existing.skill_signature === signature) continue;
+    }
     needsClassify.push({ skill, signature });
   }
   if (!needsClassify.length) return 0;
@@ -1849,11 +1932,13 @@ async function classifyAllSkills(skills) {
     const messages = [
       {
         role: 'system',
-        content: `你是一个 Skill 分类器。根据每个 skill 的名称、标题、描述，从以下五类中选择最合适的一个：
-- 热点：抓取/聚合某个主题的内容榜单、热榜、信息源
+        content: `你是一个 Skill 分类器。根据每个 skill 的名称、标题、描述，从以下七类中选择最合适的一个：
+- 热点：抓取/聚合某个主题的内容榜单、热榜、趋势追踪（无明确归属账号/平台）
+- 帐号：热门账号榜单、推荐账号、黑马账号、账号排行（如"公众号大V"）
+- 信息源：按主题/标签/关键词聚合的内容源（如"AI 公众号信息源"、"内容出海信息源"）
 - 创作：辅助内容创作的工具（如文案改写、风格转换、标题生成）
 - 分析：分析账号/内容/数据的工具（如账号诊断、爆款分析、趋势分析）
-- 检索：搜索关键词/账号/文章的工具
+- 检索：搜索关键词/账号/文章/作品的工具（如关键词搜索、内容爬取）
 - 生成工具：生成图片/视频/封面等媒体内容的工具
 
 严格只按以下格式输出（每行一个，无其他内容）：
@@ -1909,7 +1994,8 @@ async function classifyAllSkills(skills) {
         }
       }
       if (LLM_SKILL_CATEGORIES.includes(category)) {
-        upsert.run(skill.slug, category, skill.category, now, signature);
+        const finalCategory = LLM_CATEGORY_OVERRIDES[skill.slug] || category;
+        upsert.run(skill.slug, finalCategory, skill.category, now, signature);
         saved++;
       }
     }
@@ -1936,7 +2022,7 @@ function listSkills() {
       return {
         ...skill,
         isNew: state.newSlugs.has(skill.slug),
-        llmCategory: cache.get(skill.slug) || null,
+        llmCategory: LLM_CATEGORY_OVERRIDES[skill.slug] || cache.get(skill.slug) || null,
         updatedAt: stat.mtimeMs || stat.ctimeMs || 0,
       };
     })
@@ -2995,6 +3081,60 @@ const HOT_SOURCE_CONFIG = {
     cronExpr: '0 12 * * *',
     dateField: 'gmtCreate',
   },
+  'playlet-bili': {
+    label: '短剧B站',
+    endpoint: 'parseWork/queryBiliPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '短剧B站信息源-GitHub', msgType: '短剧', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
+  'playlet-xhs': {
+    label: '短剧小红书',
+    endpoint: 'parseWork/queryXhsPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '短剧小红书信息源-GitHub', msgType: '短剧', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
+  'cultural-tourism-bili': {
+    label: '文旅B站',
+    endpoint: 'parseWork/queryBiliPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '文旅B站信息源-GitHub', msgType: '文旅', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
+  'cultural-tourism-dy': {
+    label: '文旅抖音',
+    endpoint: 'parseWork/queryDyPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '文旅抖音信息源-GitHub', msgType: '文旅', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
+  'cultural-tourism-gzh': {
+    label: '文旅公众号',
+    endpoint: 'parseWork/queryGzhPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '文旅公众号信息源-GitHub', msgType: '文旅', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
+  'cultural-tourism-xhs': {
+    label: '文旅小红书',
+    endpoint: 'parseWork/queryXhsPlayletMsgs',
+    method: 'redfoxData',
+    buildRequest: (dataDate, source) => ({ source: '文旅小红书信息源-GitHub', msgType: '文旅', pageNum: 1, pageSize: 100, startTime: `${dataDate} 00:00:00`, endTime: `${dataDate} 23:59:59` }),
+    adapter: 'aiFeed',
+    cronExpr: '0 12 * * *',
+    dateField: 'gmtCreate',
+  },
 };
 
 function latestAiGzhDataDate(data, expectedDate) {
@@ -3671,29 +3811,88 @@ async function fetchKeywordHotArticles(keywords, options = {}) {
   return { articles, searched, apiCalls };
 }
 
+const TOOL_FUNCTIONS = {
+  web_search: async (args) => {
+    const query = args?.query || args?.q || args?.search_query || '';
+    if (!query) return JSON.stringify({ error: 'web_search 需要提供 query 参数' });
+    try {
+      const data = await doDoubaoWebSearch(query);
+      logAction('web_search', 'function-call', 'redfox-api', { query }, 1, 0);
+      return formatDoubaoSearchResults(data);
+    } catch (e) {
+      return JSON.stringify({ error: `web_search 失败: ${e.message}` });
+    }
+  },
+};
+
 async function callLlm(messages, options = {}) {
   const apiKey = process.env.LLM_API_KEY;
   const baseUrl = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
   const model = process.env.LLM_MODEL || 'gpt-4.1-mini';
   if (!apiKey) throw new Error('未配置 LLM_API_KEY');
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const tools = Array.isArray(options.tools) && options.tools.length ? options.tools : null;
+  const maxToolRounds = options.maxToolRounds ?? 3;
+  const currentMessages = [...messages];
+  let lastFinishReason = null;
+  for (let round = 0; round <= maxToolRounds; round++) {
+    const body = {
       model,
-      messages,
+      messages: currentMessages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 4096,
-      response_format: options.json ? { type: 'json_object' } : undefined,
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message || `LLM HTTP ${response.status}`);
-  return payload.choices?.[0]?.message?.content || '';
+    };
+    if (tools) {
+      body.tools = tools;
+      body.tool_choice = options.toolChoice || 'auto';
+    } else if (options.json) {
+      body.response_format = { type: 'json_object' };
+    }
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(90000),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      const errMsg = payload?.error?.message || `LLM HTTP ${response.status}`;
+      logErr('[callLlm] LLM API 报错', errMsg);
+      throw new Error(errMsg);
+    }
+    const msg = payload.choices?.[0]?.message || {};
+    lastFinishReason = payload.choices?.[0]?.finish_reason;
+    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    if (!toolCalls.length) {
+      return msg.content || '';
+    }
+    // 把 assistant 消息（含 tool_calls）推回 history
+    currentMessages.push({
+      role: 'assistant',
+      content: msg.content || '',
+      tool_calls: toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.function?.name, arguments: tc.function?.arguments },
+      })),
+    });
+    // 逐个执行 tool_call
+    for (const tc of toolCalls) {
+      const fnName = tc.function?.name;
+      let args = {};
+      try { args = JSON.parse(tc.function?.arguments || '{}'); } catch {}
+      const handler = TOOL_FUNCTIONS[fnName];
+      let result;
+      if (!handler) {
+        result = JSON.stringify({ error: `未知工具 ${fnName}` });
+      } else {
+        try { result = await handler(args); } catch (e) { result = JSON.stringify({ error: e.message }); }
+      }
+      currentMessages.push({ role: 'tool', tool_call_id: tc.id, name: fnName, content: result });
+    }
+    // 工具调用也算 LLM 一次
+  }
+  logErr('[callLlm] 工具调用轮次超限', `rounds=${maxToolRounds}, finish=${lastFinishReason}`);
+  throw new Error('工具调用轮次超限');
 }
 
 function parseLlmJson(content) {
@@ -3704,20 +3903,49 @@ function parseLlmJson(content) {
   return JSON.parse(cleaned);
 }
 
-async function callLlmJson(messages) {
-  const content = await callLlm(messages, { json: true });
+async function callLlmJson(messages, options = {}) {
+  const callOptions = { ...options, json: true };
+  // 如果开了联网，关掉 json_object 强制（与 tools 冲突）
+  if (callOptions.tools) delete callOptions.json;
+  let content = await callLlm(messages, callOptions);
+  // 1) 去掉 MiniMax 推理模型输出的 <think>...</think> 或 <think>...</think>
+  content = String(content)
+    .replace(/<think>[\s\S]*?<\/think>\s*/gi, '')
+    .replace(/<think>[\s\S]*?<think>/gi, '')
+    .trim();
   try {
     return parseLlmJson(content);
-  } catch {
-    // JSON 解析失败时，尝试去掉 XML 标签再解析一次
-    const stripped = String(content).replace(/<[^>]+>/g, '').trim();
-    try {
-      return parseLlmJson(stripped);
-    } catch {
-      throw new Error(`JSON 解析失败（已尝试去除 XML 标签）：${stripped.slice(0, 100)}`);
+  } catch (err) {
+    // 2) JSON 截断修复：从后往前找最后一个 }
+    if (err.message.includes('Unterminated') || err.message.includes('Unexpected end')) {
+      for (let i = content.length - 1; i >= 0; i--) {
+        if (content[i] === '}') {
+          try {
+            const r = JSON.parse(content.slice(0, i + 1));
+            console.warn('[callLlmJson] JSON 截断修复 pos=' + i);
+            return r;
+          } catch {}
+        }
+      }
     }
+    throw new Error('JSON 解析失败: ' + err.message + ' | 内容片段: ' + content.slice(0, 200));
   }
 }
+
+const WEB_SEARCH_TOOL = [{
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description: 'Use Doubao WebSearch to look up latest information. Call this whenever you need current data, product features, news, user reviews, or anything the LLM training data may not cover or that may be outdated.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search keywords; be specific (e.g. product name + feature)' },
+      },
+      required: ['query'],
+    },
+  },
+}];
 
 const HOTSPOT_LISTS = {
   bdList: ['bd', '百度'],
@@ -3970,8 +4198,17 @@ async function rewriteForPlatform(body) {
   const hotspotInstruction = hotspot?.title
     ? `选定热点：${hotspot.title}（${hotspot.platformName}）。可用关联角度：${hotspot.angle || '自行判断'}。热点主要用于标题和前言，正文不得为了关联而篡改原文事实；若关联牵强，应在标题和前言中弱化处理。`
     : '未选择热点，不要虚构或强行加入热点。';
-  // 平台对应的 rewrite skill 映射（multi-rewrite 覆盖抖音/视频号/快手/哔站）
-  const skillSlugMap = {
+  // 平台对应的 skill 映射：create 模式用 *-write（从零创作），rewrite/adapt 模式用 *-rewrite（改写）
+  const writeSkillMap = {
+    '小红书': 'xiaohongshu-write',
+    '公众号': 'wechat-write',
+    '知乎': 'zhihu-write',
+    '抖音': 'multi-write',
+    '视频号': 'multi-write',
+    '快手': 'multi-write',
+    '哔站': 'multi-write',
+  };
+  const rewriteSkillMap = {
     '小红书': 'xiaohongshu-rewrite',
     '公众号': 'wechat-rewrite',
     '知乎': 'zhihu-rewrite',
@@ -3980,11 +4217,15 @@ async function rewriteForPlatform(body) {
     '快手': 'multi-rewrite',
     '哔站': 'multi-rewrite',
   };
-  const skillSlug = skillSlugMap[platform] || 'multi-rewrite';
+  const skillSlug = mode === 'create'
+    ? (writeSkillMap[platform] || 'multi-write')
+    : (rewriteSkillMap[platform] || 'multi-rewrite');
+  // 兜底：如果 *-write skill 不存在，回退到 *-rewrite
+  const finalSkillSlug = getSkill(skillSlug) ? skillSlug : (rewriteSkillMap[platform] || 'multi-rewrite');
   let skillInstruction = '';
-  const skill = getSkill(skillSlug);
+  const skill = getSkill(finalSkillSlug);
   if (skill?.description) {
-    skillInstruction = `\n\n参考 RedFox ${skillSlug} skill 方法论（按此风格输出）：\n${String(skill.description).slice(0, 400)}`;
+    skillInstruction = `\n\n参考 RedFox ${finalSkillSlug} skill 方法论（按此风格输出）：\n${String(skill.description).slice(0, 400)}`;
   }
   // 风格档案（来自「我的」账号）
   let styleInstruction = '';
@@ -4002,34 +4243,58 @@ async function rewriteForPlatform(body) {
   }
   // 模式不同，system prompt 不同
   const modeInstruction = mode === 'create'
-    ? `基于给定主题/大纲创作一篇全新的${platform}内容，可以适当发挥但要遵守事实底线。`
+    ? `基于用户给定的主题/大纲/结构要求，创作一篇全新的${platform}内容。用户素材中已明确提到的具体内容（如产品名称、功能点、推荐人群等）必须如实呈现；用户要求介绍/对比的主体可按其提供的要点扩展结构与表达，但不得无中生有地补充用户未提及的功能细节、数据、时间表。`
     : mode === 'adapt'
       ? `直接把素材改写为${platform}风格（不补充新事实，仅风格转换、句式重组）。`
       : `将素材重构为${platform}内容（在原素材基础上扩展结构和打磨）。`;
+  let userInstructionPriority = mode === 'create'
+    ? `
+
+【用户指令优先级最高】用户在原始素材中已明确写出的内容（标题、对比对象、核心定位、推荐人群、文章结构如"前言+内容+总结"等）必须严格遵循，不要用 skill 方法论覆盖用户的明确要求。skill 风格仅作为参考润色手段。`
+    : '';
+  // create 模式下若用户素材较短（<300字），自动开启联网以避免 LLM 瞎编
+  const useWebSearch = mode === 'create' && String(text || '').length < 300;
+  const toolOption = useWebSearch ? { tools: WEB_SEARCH_TOOL } : {};
+  if (useWebSearch) {
+    userInstructionPriority += '\n\n你可以使用 web_search 工具查询最新的产品、功能点、热点等信息，需要时就调用，不要直接瞎编。';
+  }
   const result = await callLlmJson([
     {
       role: 'system',
-      content: `你是中文自媒体编辑。${modeInstruction}风格：${tone}。只能改写原始素材和所选热点明确提供的信息，不得补充原文没有的功能细节、原因、监管结论、时间表、数据或品牌案例；素材较短时正文也应保持简短。热点只用于标题和前言的自然切入，不能借热点编造正文事实。输出严格 JSON：{"title":"","intro":"","content":""}。title 是成稿标题，intro 是独立前言，content 是不重复标题和前言的正文。${skillInstruction}${styleInstruction}`,
+      content: `你是中文自媒体编辑。${modeInstruction}风格：${tone}。${userInstructionPriority}热点只用于标题和前言的自然切入，不能借热点编造正文事实。输出严格 JSON：{"title":"","intro":"","content":""}。title 是成稿标题，intro 是独立前言，content 是不重复标题和前言的正文。${skillInstruction}${styleInstruction}`,
     },
     {
       role: 'user',
-      content: `${hotspotInstruction}\n\n原始素材：\n${text}`,
+      content: `${hotspotInstruction}
+
+原始素材：
+${text}`,
     },
-  ]);
+  ], toolOption);
   let validated = result;
-  try {
-    validated = await callLlmJson([
-      {
-        role: 'system',
-        content: '你是严格的事实校对编辑。逐句检查草稿，只保留能从“原始素材”或“允许使用的热点标题”直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。',
-      },
-      {
-        role: 'user',
-        content: `原始素材：\n${text}\n\n允许使用的热点标题：\n${hotspot?.title || '无'}\n\n待校对草稿：\n${JSON.stringify(result)}`,
-      },
-    ]);
-  } catch (error) {
-    console.warn('重构事实校对失败，返回初稿：', error.message);
+  // 事实校对只在 rewrite/adapt 模式下执行（保留原文事实）；create 模式下用户要的是基于其大纲的创作，不应被事实校对删空
+  if (mode !== 'create') {
+    try {
+      validated = await callLlmJson([
+        {
+          role: 'system',
+          content: '你是严格的事实校对编辑。逐句检查草稿，只保留能从"原始素材"或"允许使用的热点标题"直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。',
+        },
+        {
+          role: 'user',
+          content: `原始素材：
+${text}
+
+允许使用的热点标题：
+${hotspot?.title || '无'}
+
+待校对草稿：
+${JSON.stringify(result)}`,
+        },
+      ]);
+    } catch (error) {
+      console.warn('重构事实校对失败，返回初稿：', error.message);
+    }
   }
   return {
     title: String(validated.title || '').trim(),
@@ -5874,9 +6139,10 @@ async function handleLocalApi(req, res, url) {
   }
   // POST /api/_/skills/classify  批量 LLM 分类所有 skill（一次调用完成）
   if (url.pathname === '/api/_/skills/classify' && req.method === 'POST') {
+    const force = url.searchParams.get('force') === '1';
     const all = listSkills();
-    const done = await classifyAllSkills(all);
-    json(res, 200, { ok: true, data: { total: all.length, done } });
+    const done = await classifyAllSkills(all, { force });
+    json(res, 200, { ok: true, data: { total: all.length, done, force } });
     return true;
   }
   if (url.pathname === '/api/_/skills/status' && req.method === 'GET') {
@@ -6253,11 +6519,12 @@ async function handleLocalApi(req, res, url) {
       INSERT INTO kb_config (source_type, provider, source_path, notion_api_key, notion_database_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_type) DO UPDATE SET
+        provider = excluded.provider,
         source_path = excluded.source_path,
         notion_api_key = excluded.notion_api_key,
         notion_database_id = excluded.notion_database_id,
         updated_at = excluded.updated_at
-    `).run('current', current.provider || sourceType, newSourcePath, encryptedApiKey, databaseId, current.created_at || now, now);
+    `).run('current', sourceType, newSourcePath, encryptedApiKey, databaseId, current.created_at || now, now);
     // 仅清掉对应源的缓存（不清全部，让另一源保留）
     if (sourceType === 'obsidian') {
       db.prepare("DELETE FROM kb_entries_cache WHERE source_type = 'obsidian'").run();
@@ -6496,8 +6763,10 @@ ${keywordsList}
     const content = String(data.content || '');
     const config = db.prepare('SELECT * FROM kb_config WHERE source_type = ?').get('current');
     if (!config || !config.provider) { json(res, 400, { ok: false, error: '未配置知识库' }); return true; }
-    if (config.provider === 'obsidian') {
-      if (!config.source_path || !fs.existsSync(config.source_path)) { json(res, 400, { ok: false, error: 'Vault 路径无效' }); return true; }
+    // 优先用请求里指定的 target（用户在导出按钮旁边选择的源）
+    const target = ['obsidian', 'notion'].includes(data.target) ? data.target : config.provider;
+    if (target === 'obsidian') {
+      if (!config.source_path || !fs.existsSync(config.source_path)) { json(res, 400, { ok: false, error: 'Obsidian Vault 路径无效，请在知识库配置中设置' }); return true; }
       try {
         const entryKey = writeNote(config.source_path, folder, title, tags, content);
         const entry = readEntry(config.source_path, entryKey);
@@ -6507,10 +6776,10 @@ ${keywordsList}
       } catch (e) { json(res, 500, { ok: false, error: e.message }); }
       return true;
     }
-    if (config.provider === 'notion') {
+    if (target === 'notion') {
       const apiKey = decryptKb(config.notion_api_key);
       const dbId = config.notion_database_id;
-      if (!apiKey || !dbId) { json(res, 400, { ok: false, error: 'Notion 未配置' }); return true; }
+      if (!apiKey || !dbId) { json(res, 400, { ok: false, error: 'Notion 未配置，请在知识库配置中设置' }); return true; }
       try {
         const entryKey = await createPage(apiKey, dbId, title, tags, folder, content);
         const entry = await getPage(apiKey, entryKey);
