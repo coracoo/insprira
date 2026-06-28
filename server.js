@@ -965,9 +965,8 @@ async function syncWersssArticles() {
   const subs = db.prepare('SELECT * FROM wersss_subscriptions WHERE enabled = 1').all();
   if (!subs.length) return { ok: true, tokenStatus: 'valid', tokenRefreshed, synced: 0, articles: 0, perMp: [] };
   const now = Date.now();
-  // 刷新订阅公众号元信息（名称、头像等可能变化）
+  // 刷新订阅公众号元信息（名称、头像等可能变化），分页拉完所有订阅
   try {
-    const freshSubs = await wersss.listSubscriptions(config.baseUrl, token, { limit: 100 });
     const updateSubMeta = db.prepare(`
       UPDATE wersss_subscriptions
       SET mp_name = COALESCE(NULLIF(?, ''), mp_name),
@@ -976,8 +975,16 @@ async function syncWersssArticles() {
           updated_at = ?
       WHERE mp_id = ?
     `);
-    for (const mp of freshSubs) {
-      updateSubMeta.run(mp.mpName, mp.mpAlias, mp.avatar, now, mp.mpId);
+    let subOffset = 0;
+    const subPageSize = 100;
+    while (true) {
+      const freshSubs = await wersss.listSubscriptions(config.baseUrl, token, { limit: subPageSize, offset: subOffset });
+      if (!freshSubs.length) break;
+      for (const mp of freshSubs) {
+        updateSubMeta.run(mp.mpName, mp.mpAlias, mp.avatar, now, mp.mpId);
+      }
+      if (freshSubs.length < subPageSize) break;
+      subOffset += subPageSize;
     }
   } catch (e) {
     console.warn('[wersss] 刷新订阅元信息失败:', e.message);
@@ -998,9 +1005,10 @@ async function syncWersssArticles() {
   const perMp = [];
   for (const sub of subs) {
     try {
-      // 先触发 we-mp-rss 去微信抓取最新文章（同步等待返回）
+      // 先触发 we-mp-rss 去微信抓取最新文章（异步线程，等 2 秒让抓取排队完成）
       try {
         await wersss.updateMp(config.baseUrl, token, sub.mp_id);
+        await new Promise(r => setTimeout(r, 2000));
       } catch (e) {
         console.warn(`[wersss] updateMp ${sub.mp_name} 失败:`, e.message);
       }
