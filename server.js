@@ -2019,12 +2019,37 @@ async function classifyAllSkills(skills, options = {}) {
   return saved;
 }
 
+// listSkills 内存缓存：以 SKILL.md mtimeMs 拼接 + skill_classifications 最新时间戳为指纹，60s 内直接复用
+let _skillCache = { fingerprint: '', skills: null, ts: 0 };
+const SKILL_CACHE_TTL_MS = 60 * 1000;
+
 function listSkills() {
   if (!fs.existsSync(SKILLS_ROOT)) return [];
+  // 快速指纹：所有 SKILL.md 的 mtimeMs 之和 + 分类表最新时间戳
+  let fingerprint = '';
+  try {
+    const names = fs.readdirSync(SKILLS_ROOT, { withFileTypes: true });
+    for (const entry of names) {
+      if (!entry.isDirectory()) continue;
+      const p = path.join(SKILLS_ROOT, entry.name, 'SKILL.md');
+      if (fs.existsSync(p)) {
+        const st = fs.statSync(p);
+        fingerprint += `${entry.name}:${st.mtimeMs}|`;
+      }
+    }
+  } catch {}
+  try {
+    const lastClassify = db.prepare('SELECT MAX(analyzed_at) AS t FROM skill_classifications').get();
+    fingerprint += `cls:${lastClassify?.t || 0}`;
+  } catch {}
+  const now = Date.now();
+  if (_skillCache.skills && _skillCache.fingerprint === fingerprint && now - _skillCache.ts < SKILL_CACHE_TTL_MS) {
+    return _skillCache.skills;
+  }
   const state = skillUpdateState();
   const rows = db.prepare('SELECT slug, llm_category FROM skill_classifications').all();
   const cache = new Map(rows.map(r => [r.slug, r.llm_category]));
-  return fs.readdirSync(SKILLS_ROOT, { withFileTypes: true })
+  const skills = fs.readdirSync(SKILLS_ROOT, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => {
       const skillPath = path.join(SKILLS_ROOT, entry.name, 'SKILL.md');
@@ -2040,6 +2065,12 @@ function listSkills() {
     })
     .filter(Boolean)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  _skillCache = { fingerprint, skills, ts: now };
+  return skills;
+}
+
+function invalidateSkillCache() {
+  _skillCache = { fingerprint: '', skills: null, ts: 0 };
 }
 
 function getSkill(slug) {
@@ -3840,16 +3871,20 @@ const TOOL_FUNCTIONS = {
 async function callLlm(messages, options = {}) {
   const apiKey = process.env.LLM_API_KEY;
   const baseUrl = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = process.env.LLM_MODEL || 'gpt-4.1-mini';
+  const primaryModel = process.env.LLM_MODEL || 'gpt-4.1-mini';
+  const fallbackModel = process.env.LLM_FALLBACK_MODEL || '';
   if (!apiKey) throw new Error('未配置 LLM_API_KEY');
   const tools = Array.isArray(options.tools) && options.tools.length ? options.tools : null;
   const maxToolRounds = options.maxToolRounds ?? 3;
-  const currentMessages = [...messages];
-  let lastFinishReason = null;
-  for (let round = 0; round <= maxToolRounds; round++) {
+  // 普通调用 30s，带 web_search 等工具要等搜索结果，超时放宽到 60s
+  const baseTimeoutMs = tools ? 60000 : 30000;
+  const timeoutMs = options.timeoutMs ?? baseTimeoutMs;
+
+  // 单次 chat.completions 调用：主模型失败且配了 fallback，则切 fallback 重试
+  const doCall = async (modelName, tMs) => {
     const body = {
-      model,
-      messages: currentMessages,
+      model: modelName,
+      messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 4096,
     };
@@ -3863,16 +3898,45 @@ async function callLlm(messages, options = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.timeout(tMs),
     });
     const payload = await response.json();
     if (!response.ok) {
       const errMsg = payload?.error?.message || `LLM HTTP ${response.status}`;
-      logErr('[callLlm] LLM API 报错', errMsg);
-      throw new Error(errMsg);
+      const err = new Error(errMsg);
+      err.status = response.status;
+      err.isLlmError = true;
+      throw err;
     }
-    const msg = payload.choices?.[0]?.message || {};
-    lastFinishReason = payload.choices?.[0]?.finish_reason;
+    return payload.choices?.[0]?.message || {};
+  };
+
+  // 单轮对话（无 tools）：主模型失败可回退 fallback
+  if (!tools) {
+    try {
+      const msg = await doCall(primaryModel, timeoutMs);
+      return msg.content || '';
+    } catch (primaryErr) {
+      if (!fallbackModel || fallbackModel === primaryModel) throw primaryErr;
+      const retriable = primaryErr.name === 'TimeoutError' || primaryErr.name === 'AbortError'
+        || /network|ECONN|fetch failed|429|rate/i.test(primaryErr.message);
+      if (!retriable) throw primaryErr;
+      logErr('[callLlm] 主模型失败切 fallback', `${primaryModel} -> ${fallbackModel}: ${primaryErr.message}`);
+      const msg = await doCall(fallbackModel, timeoutMs * 2);
+      return msg.content || '';
+    }
+  }
+
+  // 带 tools：走多轮循环（每轮重试主模型，失败不切 fallback，避免中途切换破坏 tool_call 链）
+  const currentMessages = [...messages];
+  for (let round = 0; round <= maxToolRounds; round++) {
+    let msg;
+    try {
+      msg = await doCall(primaryModel, timeoutMs);
+    } catch (err) {
+      logErr('[callLlm] tool round 失败', `round=${round} model=${primaryModel}: ${err.message}`);
+      throw err;
+    }
     const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
     if (!toolCalls.length) {
       return msg.content || '';
@@ -3907,41 +3971,41 @@ async function callLlm(messages, options = {}) {
   throw new Error('工具调用轮次超限');
 }
 
+// 解析 LLM 输出的 JSON：去 code fence / <think> 块，截断时尝试找最后一个 } 修复
 function parseLlmJson(content) {
-  const cleaned = String(content || '')
+  let cleaned = String(content || '')
     .trim()
+    // 去掉 code fence
     .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '');
-  return JSON.parse(cleaned);
+    .replace(/\s*```$/, '')
+    // 去掉 MiniMax 推理模型输出的 <think>...</think> 或 <think>...</think>
+    .replace(/<think>[\s\S]*?<\/think>\s*/gi, '')
+    .replace(/<think>[\s\S]*?<think>/gi, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    if (err.message.includes('Unterminated') || err.message.includes('Unexpected end')) {
+      for (let i = cleaned.length - 1; i >= 0; i--) {
+        if (cleaned[i] === '}') {
+          try {
+            const r = JSON.parse(cleaned.slice(0, i + 1));
+            console.warn('[parseLlmJson] JSON 截断修复 pos=' + i);
+            return r;
+          } catch {}
+        }
+      }
+    }
+    throw new Error('JSON 解析失败: ' + err.message + ' | 内容片段: ' + cleaned.slice(0, 200));
+  }
 }
 
 async function callLlmJson(messages, options = {}) {
   const callOptions = { ...options, json: true };
   // 如果开了联网，关掉 json_object 强制（与 tools 冲突）
   if (callOptions.tools) delete callOptions.json;
-  let content = await callLlm(messages, callOptions);
-  // 1) 去掉 MiniMax 推理模型输出的 <think>...</think> 或 <think>...</think>
-  content = String(content)
-    .replace(/<think>[\s\S]*?<\/think>\s*/gi, '')
-    .replace(/<think>[\s\S]*?<think>/gi, '')
-    .trim();
-  try {
-    return parseLlmJson(content);
-  } catch (err) {
-    // 2) JSON 截断修复：从后往前找最后一个 }
-    if (err.message.includes('Unterminated') || err.message.includes('Unexpected end')) {
-      for (let i = content.length - 1; i >= 0; i--) {
-        if (content[i] === '}') {
-          try {
-            const r = JSON.parse(content.slice(0, i + 1));
-            console.warn('[callLlmJson] JSON 截断修复 pos=' + i);
-            return r;
-          } catch {}
-        }
-      }
-    }
-    throw new Error('JSON 解析失败: ' + err.message + ' | 内容片段: ' + content.slice(0, 200));
-  }
+  const content = await callLlm(messages, callOptions);
+  return parseLlmJson(content);
 }
 
 const WEB_SEARCH_TOOL = [{
@@ -4284,13 +4348,18 @@ ${text}`,
     },
   ], toolOption);
   let validated = result;
-  // 事实校对只在 rewrite/adapt 模式下执行（保留原文事实）；create 模式下用户要的是基于其大纲的创作，不应被事实校对删空
-  if (mode !== 'create') {
+  // 事实校对：rewrite/adapt 模式强校对（保留原文事实）；create 模式只有在开了 web_search 时才轻校对
+  // （避免 AI 把联网结果当事实输出，但放行用户素材中已有的合理内容）
+  const needFactCheck = mode !== 'create' || useWebSearch;
+  if (needFactCheck) {
     try {
+      const factCheckInstruction = useWebSearch
+        ? '你是事实校对编辑。create 模式下用户开了联网搜索，AI 可能引用了搜索结果。规则：（1）用户原始素材中明确出现过的内容全部保留；（2）从联网搜索得到的内容可保留，但删除凭空编造的具体数字、时间、价格、统计百分比、版本号、产品参数（除非这些信息来自素材或搜索结果可验证）；（3）保留 JSON 字段不变。'
+        : '你是严格的事实校对编辑。逐句检查草稿，只保留能从"原始素材"或"允许使用的热点标题"直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。';
       validated = await callLlmJson([
         {
           role: 'system',
-          content: '你是严格的事实校对编辑。逐句检查草稿，只保留能从"原始素材"或"允许使用的热点标题"直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。',
+          content: factCheckInstruction,
         },
         {
           role: 'user',
