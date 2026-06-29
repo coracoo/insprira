@@ -1,9 +1,6 @@
 services:
   insprira:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: insprira:latest
+    image: ghcr.io/coracoo/insprira:v0.1.7
     container_name: insprira
     restart: unless-stopped
     ports:
@@ -14,9 +11,3 @@ services:
       HOST: 0.0.0.0
     volumes:
       - ./data:/data
-      - ./.env:/app/.env:ro
-      - ./server.js:/app/server.js:ro
-      - ./package.json:/app/package.json:ro
-      - ./kb_wersss.js:/app/kb_wersss.js:ro
-      - ./js:/app/js:ro
-      - ./index.html:/app/index.html:ro

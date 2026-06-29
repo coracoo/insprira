@@ -43,10 +43,8 @@ window.addEventListener('popstate', (e) => {
 
 // 在页面加载时立即拉版本号（侧边栏在登录前就显示）
 function applyAppVersion(version) {
-  const tag = document.querySelector('.sidebar-brand-text .text-\\[10px\\]');
-  if (tag) tag.textContent = `v${version} · 真实数据`;
-  const footer = document.querySelector('.sidebar-footer p');
-  if (footer) footer.textContent = footer.textContent.replace(/v\d+\.\d+\.\d+/, `v${version}`);
+  const tag = document.querySelector('[data-app-version]');
+  if (tag) tag.textContent = `v${version}`;
   const brandTitle = document.querySelector('.sidebar-brand-text .font-bold');
   if (brandTitle) brandTitle.setAttribute('title', `灵感熔炉 v${version}`);
 }

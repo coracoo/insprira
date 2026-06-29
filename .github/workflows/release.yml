@@ -29,28 +29,10 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Read CHANGELOG entry
-        id: notes
-        run: |
-          node -e "
-          const fs = require('fs');
-          const tag = '${{ steps.tag.outputs.tag }}';
-          const tagVer = tag.replace(/^v/, '');
-          const log = fs.existsSync('CHANGELOG.md') ? fs.readFileSync('CHANGELOG.md', 'utf8') : '';
-          const re = new RegExp('##\\s*\\[?' + tagVer.replace(/\\./g, '\\\\.') + '[^\\n]*\\n([\\\\s\\\\S]*?)(?=\\n##\\s|\\$)');
-          const m = log.match(re);
-          process.stdout.write(m ? m[1].trim() : 'Release ' + tag);
-          " > notes.md
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          cat notes.md >> "$GITHUB_OUTPUT"
-          echo "" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
-          body: ${{ steps.notes.outputs.notes }}
           generate_release_notes: true
           fail_on_unmatched_files: false
