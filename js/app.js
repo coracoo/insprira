@@ -22,6 +22,7 @@ import { gotoPage, refreshCurrent, doGlobalSearch, toggleSidebar, openMobileSide
 import { initErrorBoundary } from './errorBoundary.js';
 import { loadCurrentAccount, openAccountModal, saveAccountProfile, changeAccountPassword, logoutAccount } from './account.js';
 import { initTheme, toggleTheme } from './theme.js';
+import { initForgeBar, setForgeState } from './forge-bar.js';
 
 // ============= Item Cache handlers 注册 ============
 registerItemCacheHandlers({
@@ -32,6 +33,7 @@ registerItemCacheHandlers({
 
 initErrorBoundary();
 initTheme();
+initForgeBar();
 
 // 页面加载即拉版本号，更新侧边栏（登录前也显示）
 localApi('version').then(r => {

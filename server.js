@@ -1006,7 +1006,8 @@ function scheduleCronJob(id, cronExpr, taskType, taskConfig = {}) {
       db.prepare('UPDATE crontab SET last_run = ? WHERE id = ?').run(Date.now(), id);
       if (notifySuccess) {
         const summary = describeCronResult(taskType, result);
-        broadcastNotification(
+        notifLib.broadcastNotification(
+          notificationConfigs,
           `定时任务执行成功：${cronName}`,
           `任务「${cronName}」于 ${new Date().toLocaleString('zh-CN')} 执行完成。${summary}`
         ).catch(err => console.warn('[notify] cron 成功通知异常:', err.message));
@@ -1014,7 +1015,8 @@ function scheduleCronJob(id, cronExpr, taskType, taskConfig = {}) {
     } catch (error) {
       console.error(`[cron] ${id} 执行失败:`, error.message);
       if (notifyFailure) {
-        broadcastNotification(
+        notifLib.broadcastNotification(
+          notificationConfigs,
           `定时任务执行失败：${cronName}`,
           `任务「${cronName}」(${id}) 在 ${new Date().toLocaleString('zh-CN')} 执行失败：\n${error.message}`
         ).catch(err => console.warn('[notify] cron 失败通知异常:', err.message));
