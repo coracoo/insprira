@@ -23,6 +23,18 @@ export async function renderSettings() {
     if (!llmPill) return;
     llmPill.className = `pill ${status.llmConfigured ? 'pill-green' : 'pill-hot'}`;
     llmPill.innerHTML = `<i data-lucide="${status.llmConfigured ? 'check' : 'x'}" class="w-3 h-3"></i>${status.llmConfigured ? '已配置' : '未配置'}`;
+    const githubPill = document.getElementById('github-status-pill');
+    if (githubPill) {
+      const on = !!status.githubConfigured;
+      githubPill.className = `pill ${on ? 'pill-green' : 'pill-gray'}`;
+      githubPill.innerHTML = `<i data-lucide="${on ? 'check' : 'minus'}" class="w-3 h-3"></i>${on ? '已配置' : '未配置'}`;
+    }
+    const notionPill = document.getElementById('notion-status-pill');
+    if (notionPill) {
+      const on = !!status.notionConfigured;
+      notionPill.className = `pill ${on ? 'pill-green' : 'pill-gray'}`;
+      notionPill.innerHTML = `<i data-lucide="${on ? 'check' : 'minus'}" class="w-3 h-3"></i>${on ? '已配置' : '未配置'}`;
+    }
     document.getElementById('api-detail').textContent = '配置变更后需重启服务生效';
     await loadQuota();
     await renderCronList();
