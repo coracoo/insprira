@@ -291,7 +291,7 @@ export function renderAgentThreads() {
     return;
   }
   host.innerHTML = myThreads.map(thread => `
-    <div class="group flex items-center gap-1 px-2.5 py-2 rounded-lg border cursor-pointer text-xs ${thread.id === currentAgentThreadId ? 'border-purple-500/25 bg-purple-500/10 text-white' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-white/10 hover:bg-white/[0.04]'}" data-action="switchAgentThread" data-id="${thread.id}">
+    <div class="group flex items-center gap-1 px-2.5 py-2 rounded-lg border cursor-pointer text-xs ${thread.id === currentAgentThreadId ? 'border-amber-500/25 bg-amber-500/10 text-white' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-white/10 hover:bg-white/[0.04]'}" data-action="switchAgentThread" data-id="${thread.id}">
       <span class="flex-1 truncate">${esc(thread.name)}</span>
       <button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="deleteAgentThread" data-id="${thread.id}" title="删除">
         <i data-lucide="x" class="w-3 h-3"></i>

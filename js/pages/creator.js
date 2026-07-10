@@ -55,8 +55,8 @@ function bindCreatorModeTabs() {
       currentCreatorMode = mode;
       document.querySelectorAll('.creator-mode-tab').forEach(b => {
         const active = b.dataset.mode === mode;
-        b.classList.toggle('bg-purple-500/20', active);
-        b.classList.toggle('text-purple-300', active);
+        b.classList.toggle('bg-amber-500/20', active);
+        b.classList.toggle('text-amber-300', active);
         b.classList.toggle('text-gray-400', !active);
       });
       const hint = document.getElementById('creator-mode-hint');
@@ -260,7 +260,7 @@ export function renderRewriteHotspots(keywords = []) {
   document.getElementById('rewriteHotspotList').innerHTML = rewriteHotspots.length
     ? rewriteHotspots.map((hotspot, index) => {
         const active = selectedRewriteHotspot?.id === hotspot.id;
-        const btnClass = active ? 'border-purple-400 bg-purple-500/10' : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.05]';
+        const btnClass = active ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.05]';
         return `
       <button class="w-full text-left rounded-lg border p-3 transition ${btnClass}" data-action="selectRewriteHotspot" data-index="${index}">
         <div class="flex items-start gap-2">

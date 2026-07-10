@@ -343,23 +343,10 @@
 .border-white\/15{border-color:var(--line-2);}
 .border-white\/20{border-color:var(--overlay-5);}
 
-/* ============ Tailwind 冷色覆盖（让冷紫/冷粉/冷靛跟随余烬橙） ============ */
-.text-purple-200{color:#fde68a;}
-.text-purple-300{color:#fcd34d;}
-.text-purple-400{color:#fbbf24;}
-.text-purple-500{color:#f97316;}
-.text-purple-600{color:#ea580c;}
-.bg-purple-500\/5{background-color:rgba(249,115,22,.05);}
-.bg-purple-500\/10{background-color:rgba(249,115,22,.10);}
-.bg-purple-500\/15{background-color:rgba(249,115,22,.15);}
-.bg-purple-500\/20{background-color:rgba(249,115,22,.20);}
-.bg-purple-500\/30{background-color:rgba(249,115,22,.30);}
-.border-purple-500\/20{border-color:rgba(249,115,22,.25);}
-.border-purple-500\/30{border-color:rgba(249,115,22,.35);}
-.border-purple-500\/40{border-color:rgba(249,115,22,.50);}
-.border-purple-500\/50{border-color:rgba(249,115,22,.60);}
-.border-purple-500{border-color:#f97316;}
-.accent-purple-500{accent-color:#f97316;}
+/* ============ Tailwind 渐变色覆盖 ============
+   只针对 SaaS 紫→ember 的 hero 渐变（from-indigo-500 via-purple-500 to-pink-500），
+   保留 purple/pink/indigo 作为 per-feature 语义色（cron 类型、user 气泡、AI 摘要等），
+   避免把"次级紫色 accent"误杀成 ember 橙。 */
 .from-indigo-500{--tw-gradient-from:#f97316;}
 .via-purple-500{--tw-gradient-via:#fbbf24;--tw-gradient-via-stops:var(--tw-gradient-position),var(--tw-gradient-from),var(--tw-gradient-via),var(--tw-gradient-to);}
 .to-pink-500{--tw-gradient-to:#fde047;}
