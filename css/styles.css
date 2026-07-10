@@ -353,10 +353,18 @@
 .from-pink-500{--tw-gradient-from:#fbbf24;}
 .to-orange-500{--tw-gradient-to:#f97316;}
 
-/* ============ 紫色 light-mode 修正 ============
-   原生 Tailwind purple-300 (#d8b4fe) 是浅薰衣草色，在 cream 底色 (#fefcf7) 上
-   几乎不可见。purple-700 (#7e22ce) 在两种主题下都有足够对比度。
-   dark mode 下原生 purple-300 已经够亮，无需 override。 */
+/* ============ 300 色阶 light-mode 修正 ============
+   Tailwind 300 色阶（orange-300/sky-300/emerald-300/amber-300/pink-300/cyan-300/
+   gray-300/purple-300）都是浅色，dark mode 配暗底没问题，但 light mode (#fefcf7
+   cream 底) 下几乎不可见。批量映射到 700 色阶保持可读性。
+   dark mode 下原生 300 色阶已经够亮，无需 override。 */
+:root[data-theme="light"] .text-orange-300{color:#c2410c;}
+:root[data-theme="light"] .text-sky-300{color:#0369a1;}
+:root[data-theme="light"] .text-emerald-300{color:#047857;}
+:root[data-theme="light"] .text-amber-300{color:#b45309;}
+:root[data-theme="light"] .text-pink-300{color:#be185d;}
+:root[data-theme="light"] .text-cyan-300{color:#0e7490;}
+:root[data-theme="light"] .text-gray-300{color:#374151;}
 :root[data-theme="light"] .text-purple-300{color:#7e22ce;}
 :root[data-theme="light"] .text-purple-400{color:#6b21a8;}
 :root[data-theme="light"] .text-purple-200{color:#9333ea;}
