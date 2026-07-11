@@ -653,13 +653,13 @@
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-sm font-semibold flex items-center gap-1.5"><i data-lucide="hammer" class="w-3.5 h-3.5 text-amber-400"></i>输入素材</h3>
           <div class="inline-flex rounded-md bg-white/[0.03] p-0.5" id="creator-mode-tabs">
-            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab bg-amber-500/20 text-amber-300" data-mode="rewrite" title="基于素材扩展结构和打磨">重构</button>
-            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab text-gray-400 hover:text-gray-200" data-mode="create" title="从零创作（可适当发挥，但遵守事实底线）">创作</button>
+            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab bg-amber-500/20 text-amber-300" data-mode="create" title="从零创作（可适当发挥，但遵守事实底线）">创作</button>
+            <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab text-gray-400 hover:text-gray-200" data-mode="rewrite" title="基于素材扩展结构和打磨">重构</button>
             <button class="px-3 py-1 text-xs rounded-md transition creator-mode-tab text-gray-400 hover:text-gray-200" data-mode="adapt" title="直接换风格，不补充新事实">改写</button>
           </div>
         </div>
-        <textarea class="input w-full flex-1 resize-none min-h-0 text-sm leading-relaxed" id="creatorInput" placeholder="粘贴一段爆款文案，或输入一个选题关键词..."></textarea>
-        <div id="creator-mode-hint" class="text-[10px] text-gray-500 mt-2">重构模式：在原素材基础上扩展结构和打磨，保留事实</div>
+        <textarea class="input w-full flex-1 resize-none min-h-0 text-sm leading-relaxed" id="creatorInput" placeholder="输入主题/大纲/关键词，AI 会基于此创作全新内容..."></textarea>
+        <div id="creator-mode-hint" class="text-[10px] text-gray-500 mt-2">创作模式：基于主题/大纲从零写，可适当发挥但遵守事实底线</div>
       </div>
     </div>
     <div class="forge-axis hidden lg:flex" aria-hidden="true"></div>

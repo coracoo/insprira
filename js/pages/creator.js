@@ -8,7 +8,7 @@ import { initIcons } from '../icons.js';
 
 let rewriteHotspots = [];
 let selectedRewriteHotspot = null;
-let currentCreatorMode = 'rewrite';  // create / rewrite / adapt
+let currentCreatorMode = 'create';  // create / rewrite / adapt
 const MODE_META = {
   create:  { label: '开始创作', hint: '创作模式：基于主题/大纲从零写，可适当发挥但遵守事实底线' },
   rewrite: { label: '开始重构', hint: '重构模式：在原素材基础上扩展结构和打磨，保留事实' },
