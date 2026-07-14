@@ -35,7 +35,10 @@ function mpAvatarPlaceholder(name, id, size = 'w-5 h-5', iconSize = 'w-3 h-3') {
 export async function renderKnowledgebase() {
   try {
     const cfg = await localApi('kb/config');
-    currentKbSource = cfg.sourceType || 'obsidian';
+    // 默认强制 Obsidian tab：不读 cfg.sourceType，避免配置过 notion 后视觉/数据错位
+    currentKbSource = 'obsidian';
+    currentKbTab = 'obsidian';
+    syncKbTabHighlight('obsidian');
     const libCount = LS.get('library', []).length;
     document.getElementById('kb-lib-count').textContent = libCount;
     if (!cfg.sourceType) {
@@ -43,7 +46,7 @@ export async function renderKnowledgebase() {
       document.getElementById('kb-empty').classList.remove('hidden');
       document.getElementById('kb-empty-msg').textContent = '知识库未配置';
       document.getElementById('kb-empty-hint').textContent = '点击"配置"按钮设置 Obsidian 路径或 Notion API';
-      await updateKbSub(currentKbTab || 'obsidian');
+      await updateKbSub('obsidian');
       initIcons(document.getElementById('content-area'));
       return;
     }
@@ -59,6 +62,20 @@ export async function renderKnowledgebase() {
   } catch (e) {
     toast('加载知识库配置失败: ' + e.message, 'error');
   }
+}
+
+function syncKbTabHighlight(tab) {
+  document.querySelectorAll('.kb-tab').forEach(t => {
+    const isActive = t.dataset.tabName === tab || t.dataset.tab === tab;
+    t.classList.toggle('active', isActive);
+    t.classList.toggle('border-brand', isActive);
+    t.classList.toggle('border-transparent', !isActive);
+    t.classList.toggle('text-gray-400', !isActive);
+  });
+  const isKbSource = tab === 'obsidian' || tab === 'notion';
+  document.getElementById('kb-tab-kb')?.classList.toggle('hidden', !isKbSource);
+  document.getElementById('kb-tab-library')?.classList.toggle('hidden', tab !== 'library');
+  document.getElementById('kb-tab-wersss')?.classList.toggle('hidden', tab !== 'wersss');
 }
 
 export async function switchKbTab(el, d) {
