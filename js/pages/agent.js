@@ -31,16 +31,16 @@ export async function renderSkills() {
   try {
     const skills = await loadSkills();
     document.getElementById('skill-local-count').textContent = `${skills.length} 个已下载`;
-    // 分类下拉固定使用 LLM 七类
+    // 分类下拉固定使用 7 类（与 lib/skills.js LLM_SKILL_CATEGORIES 同步）
     document.getElementById('skillCategory').innerHTML = [
       '<option value="all">全部分类</option>',
-      '<option value="热点">热点</option>',
-      '<option value="帐号">帐号</option>',
+      '<option value="热榜">热榜</option>',
       '<option value="信息源">信息源</option>',
+      '<option value="检索">检索</option>',
       '<option value="创作">创作</option>',
       '<option value="分析">分析</option>',
-      '<option value="检索">检索</option>',
-      '<option value="生成工具">生成工具</option>',
+      '<option value="媒体">媒体</option>',
+      '<option value="综合">综合</option>',
     ].join('');
     filterSkills();
     checkSkillUpdates(false);
@@ -63,7 +63,7 @@ export function filterSkills() {
   }).sort((a, b) => (a.title || a.name || '').localeCompare(b.title || b.name || '', 'zh-Hans-CN'));
   grid.innerHTML = filtered.map(skill => {
     const cat = skill.llmCategory || skill.category || '其他';
-    const catColor = { '热点': 'pill-hot', '帐号': 'pill-rose', '信息源': 'pill-cyan', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '生成工具': 'pill-amber' }[cat] || 'pill-gray';
+    const catColor = { '热榜': 'pill-hot', '信息源': 'pill-cyan', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '媒体': 'pill-amber', '综合': 'pill-gray' }[cat] || 'pill-gray';
     const bindable = skill.sourceBinding; // 后端配置了热榜映射即显示绑定按钮，不依赖 LLM 分类
     const bindBtn = bindable
       ? `<button class="btn ${skill.cronEnabled ? 'btn-ghost' : 'btn-primary'} py-1 text-[11px] flex-shrink-0" data-action="bindSkillToSource" data-slug="${esc(skill.slug)}" data-stop-propagation title="${skill.cronEnabled ? '已在热榜中' : '启用对应的定时任务'}">
