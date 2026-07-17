@@ -212,10 +212,7 @@ export async function renderHotTab(tab) {
     }
     list = list.filter(item => item.title);
     list.forEach((it, i) => it._rank = i + 1);
-    const tabDate = result.dataDate || (result.data[0]?.snapshotDate || '');
-    const dateStr = tabDate ? tabDate.slice(5).replace('-', '/') : '';
-    const dateHtml = dateStr ? `<div class="col-span-full text-[10px] text-gray-600 mb-1">榜单所属日期：${dateStr}</div>` : '';
-    content.innerHTML = dateHtml + list.map(renderCompactItem).join('');
+    content.innerHTML = list.map(renderCompactItem).join('');
   } catch (e) {
     if (e.name === 'AbortError') return;
     if (content.isConnected) content.innerHTML = `<div class="text-center text-red-400 py-8 text-sm">加载失败：${esc(e.message)}</div>`;
