@@ -310,13 +310,6 @@
     <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px" id="hot-top10"></div>
   </div>
   <div class="glass rounded-xl p-5">
-    <div id="hot-tabs" class="flex items-center flex-wrap gap-1 mb-4 border-b border-white/5 -mx-5 px-5 pb-3">
-      <button class="tab-btn active px-3 py-1.5 text-sm rounded-md" data-tab="trending-hub">全网聚合</button>
-    </div>
-    <div id="hot-tab-meta" class="mb-3"></div>
-    <div id="hot-tab-content" class="space-y-2"></div>
-  </div>
-  <div class="glass rounded-xl p-5">
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
         <h2 class="font-semibold flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-cyan-400"></i>热点趋势</h2>
@@ -331,6 +324,11 @@
       </div>
     </div>
     <div id="hot-trends" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+  </div>
+  <div class="glass rounded-xl p-5">
+    <div id="hot-tabs" class="flex items-center flex-wrap gap-1 mb-4 border-b border-white/5 -mx-5 px-5 pb-3"></div>
+    <div id="hot-tab-meta" class="mb-3"></div>
+    <div id="hot-tab-content" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2"></div>
   </div>
 </div>
 </template>

@@ -8,6 +8,26 @@ import { adaptDY, adaptXHS, adaptGZH, adaptAIGZH, adaptAIBili, adaptAIXHS, adapt
 import { renderListItem } from '../core/renderers.js';
 
 let hotCache = { dy: null, xhs: null, gzh: null, aiGzh: null, hotKeyword: null, hotCacheTime: 0 };
+
+// 热榜 tab grid 专用紧凑渲染：4 列 × 5 行，单行标题 + 1 行指标
+function renderCompactItem(item) {
+  const num = v => esc(v == null ? '' : String(v));
+  const metrics = item.plat === 'dy'
+    ? `<span class="text-orange-400">🔥${num(item.like)}</span><span>💬${num(item.comment)}</span>`
+    : item.plat === 'xhs'
+    ? `<span class="text-pink-400">❤${num(item.like)}</span><span>⭐${num(item.collect)}</span>`
+    : `<span class="text-emerald-400">👁${num(item.read)}</span><span>👍${num(item.like || item.watch)}</span>`;
+  return `
+    <div class="card p-2 bg-white/[0.02] rounded-md flex items-start gap-1.5 hover:bg-white/[0.05] transition" data-action="showDetail" data-plat="${esc(item.plat)}" data-work-id="${esc(item.workId)}">
+      ${rankBadge(item._rank || 0)}
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium line-clamp-2 leading-tight">${esc(item.title || '(无标题)')}</div>
+        <div class="flex items-center gap-1.5 mt-1 text-[10px] text-gray-500 flex-wrap">
+          ${metrics}
+        </div>
+      </div>
+    </div>`;
+}
 let hotPlatforms = [];
 
 export function clearHotCache() {
@@ -97,7 +117,17 @@ export async function renderHotlist() {
   if (!top.isConnected) return;
   await renderHotTabs();
   if (!top.isConnected) return;
-  await renderHotTab('trending-hub');
+  // 初始 tab 用第一个平台（trending-hub 是静态 HTML 占位，renderHotTabs 已替换）
+  const platforms = await loadHotPlatforms();
+  const initialTab = platforms[0]?.key;
+  if (initialTab) {
+    await renderHotTab(initialTab);
+  } else {
+    const content = document.getElementById('hot-tab-content');
+    const metaEl = document.getElementById('hot-tab-meta');
+    if (content) content.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">暂无热榜 Tab，到 Skill 中心绑定平台热榜 Skill 后会出现</div>';
+    if (metaEl) metaEl.innerHTML = '';
+  }
   if (!top.isConnected) return;
   await loadHotTrends();
   if (!top.isConnected) return;
@@ -134,36 +164,7 @@ export async function renderHotTab(tab) {
   const metaEl = document.getElementById('hot-tab-meta');
   if (!content || !metaEl) return;
 
-  // 特殊：全网聚合 tab 直接复用 top 区域的关键词数据
-  if (tab === 'trending-hub') {
-    if (!hotCache.hotKeyword) {
-      try { hotCache.hotKeyword = await localApi('hot/keywords'); } catch {}
-    }
-    const kw = (hotCache.hotKeyword?.data) || [];
-    metaEl.innerHTML = `<div class="text-[11px] text-gray-400">基于 hourly 收录的 7 大平台热搜数据聚合 · 共 ${kw.length} 条</div>`;
-    if (!kw.length) {
-      content.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">暂无热点数据，<button class="text-pink-400 underline" data-action="syncHotKeywords">立即刷新</button></div>';
-      initIcons(content);
-      return;
-    }
-    content.innerHTML = kw.map((item, i) => {
-      const plats = item.raw?.plats || [];
-      return `
-        <div class="flex items-center gap-3 p-2.5 bg-white/[0.02] rounded-lg card border border-white/5">
-          ${rankBadge(i + 1)}
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium truncate">${esc(item.title)}</div>
-            <div class="flex items-center gap-1 mt-0.5 text-[10px] text-gray-500 flex-wrap">
-              ${plats.slice(0, 6).map(p => `<span class="flex items-center gap-0.5"><span class="platform-dot" style="background:${platColor(platCodeByName(p))}"></span>${esc(p)}</span>`).join(' ')}
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-    initIcons(content);
-    return;
-  }
-
-  content.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">加载中…</div>';
+  content.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">加载中…</div>';
   metaEl.innerHTML = '';
   cancelApi('hotlist-tab');
   try {
@@ -183,7 +184,7 @@ export async function renderHotTab(tab) {
       </div>`;
     if (!Array.isArray(result?.data) || result.data.length === 0) {
       content.innerHTML = `
-        <div class="text-center text-gray-400 py-8 text-sm">
+        <div class="col-span-full text-center text-gray-400 py-8 text-sm">
           <div class="mb-3">暂无 ${tabNames[tab] || tab} 本地数据</div>
           <button class="btn btn-primary py-1.5 text-xs" data-action="syncHotTab" data-tab="${tab}"><i data-lucide="refresh-cw" class="w-3 h-3"></i>刷新 ${tabNames[tab] || tab}</button>
         </div>`;
@@ -193,6 +194,7 @@ export async function renderHotTab(tab) {
     const platformCfg = platforms.find(p => p.key === tab);
     const adapter = platformCfg?.adapter;
     let list = [];
+    // 4 列 × 5 行 = 20 条，保持紧凑
     if (tab === 'dy') {
       list = result.data.slice(0, 20).map(item => adaptDY(item.raw));
     } else if (tab === 'xhs') {
@@ -200,20 +202,20 @@ export async function renderHotTab(tab) {
     } else if (tab === 'gzh') {
       list = result.data.slice(0, 20).map(item => adaptGZH(item.raw));
     } else if (tab === 'ai-gzh') {
-      list = result.data.slice(0, 50).map(item => adaptAIGZH(item.raw));
+      list = result.data.slice(0, 20).map(item => adaptAIGZH(item.raw));
     } else if (tab === 'ai-bili') {
-      list = result.data.slice(0, 50).map(item => adaptAIBili(item.raw));
+      list = result.data.slice(0, 20).map(item => adaptAIBili(item.raw));
     } else if (tab === 'ai-xhs') {
-      list = result.data.slice(0, 50).map(item => adaptAIXHS(item.raw));
+      list = result.data.slice(0, 20).map(item => adaptAIXHS(item.raw));
     } else if (adapter === 'aiFeed') {
-      list = result.data.slice(0, 50).map(item => adaptAiFeed(item.raw, tab));
+      list = result.data.slice(0, 20).map(item => adaptAiFeed(item.raw, tab));
     }
     list = list.filter(item => item.title);
     list.forEach((it, i) => it._rank = i + 1);
     const tabDate = result.dataDate || (result.data[0]?.snapshotDate || '');
     const dateStr = tabDate ? tabDate.slice(5).replace('-', '/') : '';
-    const dateHtml = dateStr ? `<div class="text-[10px] text-gray-600 mb-2">榜单所属日期：${dateStr}</div>` : '';
-    content.innerHTML = dateHtml + list.map(renderListItem).join('');
+    const dateHtml = dateStr ? `<div class="col-span-full text-[10px] text-gray-600 mb-1">榜单所属日期：${dateStr}</div>` : '';
+    content.innerHTML = dateHtml + list.map(renderCompactItem).join('');
   } catch (e) {
     if (e.name === 'AbortError') return;
     if (content.isConnected) content.innerHTML = `<div class="text-center text-red-400 py-8 text-sm">加载失败：${esc(e.message)}</div>`;
@@ -262,9 +264,10 @@ export async function syncHotTab(tab) {
 }
 
 export function bindHotTabs() {
-  document.querySelectorAll('[data-tab]').forEach(btn => {
+  // 只绑 #hot-tabs 内的 .tab-btn（避开 close 按钮也带 data-tab 的情况）
+  document.querySelectorAll('#hot-tabs .tab-btn').forEach(btn => {
     btn.onclick = () => {
-      document.querySelectorAll('[data-tab]').forEach(b => { b.classList.remove('active'); b.style.background = 'transparent'; b.style.color = ''; });
+      document.querySelectorAll('#hot-tabs .tab-btn').forEach(b => { b.classList.remove('active'); b.style.background = 'transparent'; b.style.color = ''; });
       btn.classList.add('active');
       btn.style.background = 'rgba(139,92,246,.15)';
       btn.style.color = '#c4b5fd';
