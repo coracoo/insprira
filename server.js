@@ -122,7 +122,7 @@ const skillsLib = require('./lib/skills').make({
 });
 const {
   parseSkillFile, skillUpdateState, getSkillSourceBinding, bindSkillToSource,
-  classifySkill, classifyAllSkills, listSkills, invalidateSkillCache, getSkill,
+  classifyAllSkills, listSkills, invalidateSkillCache, getSkill,
   localSkillManifest, remoteSkillManifest, compareSkillManifests,
   communitySkillUpdateStatus, updateCommunitySkills,
 } = skillsLib;
