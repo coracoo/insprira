@@ -807,6 +807,12 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
 
+  if (await require('./lib/routes/xhs-mcp').tryRoute(req, res, url, {
+    xhsMcpService: require('./lib/xhs-mcp/service'),
+  })) {
+    return true;
+  }
+
   if (await require('./lib/routes/accounts').tryRoute(req, res, url, {
     listMyAccounts, saveMyAccount, getMyAccount,
     extractAccountTracks, extractAccountStyleProfile, generatePresetInspirations,

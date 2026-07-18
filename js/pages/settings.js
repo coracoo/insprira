@@ -35,6 +35,32 @@ export async function renderSettings() {
       notionPill.className = `pill ${on ? 'pill-green' : 'pill-gray'}`;
       notionPill.innerHTML = `<i data-lucide="${on ? 'check' : 'minus'}" class="w-3 h-3"></i>${on ? '已配置' : '未配置'}`;
     }
+    // 小红书 MCP pill + 状态文本
+    const xhsPill = document.getElementById('xhs-mcp-status-pill');
+    const xhsText = document.getElementById('xhs-mcp-status-text');
+    if (xhsPill) {
+      const configured = !!status.xhsMcpConfigured;
+      const loginStatus = status.xhsMcpLoginStatus || 'unknown';
+      let label = '未配置';
+      let tone = 'pill-gray';
+      if (configured) {
+        if (loginStatus === 'logged_in') { label = '已登录'; tone = 'pill-green'; }
+        else if (loginStatus === 'logged_out') { label = '未登录'; tone = 'pill-hot'; }
+        else { label = '已配置'; tone = 'pill-amber'; }
+      }
+      xhsPill.className = `pill ${tone}`;
+      xhsPill.innerHTML = `<i data-lucide="${configured ? 'check' : 'minus'}" class="w-3 h-3"></i>${label}`;
+      if (xhsText) xhsText.textContent = configured ? `接入：${loginStatus}` : '未配置';
+    }
+    // WeRss pill（参考状态，已配置则跳知识库页配置）
+    const wersssPill = document.getElementById('wersss-status-pill');
+    const wersssText = document.getElementById('wersss-status-text');
+    if (wersssPill) {
+      // 复用知识库 tab 的 wersss 配置状态：这里只显示占位，准确状态走知识库页
+      wersssPill.className = 'pill pill-gray';
+      wersssPill.innerHTML = '<i data-lucide="info" class="w-3 h-3"></i>查看';
+      if (wersssText) wersssText.textContent = '在知识库 → WeRss 公众号 tab 配置';
+    }
     document.getElementById('api-detail').textContent = '配置变更后需重启服务生效';
     await loadQuota();
     await renderCronList();
@@ -52,6 +78,115 @@ export async function openRedfoxApply() {
     const url = payload?.url;
     if (!url) { toast('申请入口未配置', 'error'); return; }
     window.open(url, '_blank', 'noopener');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function openXhsMcpConfig() {
+  let cfg = { configured: false, enabled: false, baseUrl: '', mcpUrl: '', loginStatus: 'unknown' };
+  try { cfg = { ...cfg, ...(await localApi('xhs-mcp/config')) }; } catch {}
+  const modal = document.createElement('div');
+  modal.className = 'modal-mask';
+  modal.innerHTML = `<div class="modal" style="max-width:560px">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold flex items-center gap-2"><i data-lucide="book-open" class="w-5 h-5 text-pink-400"></i>配置 小红书 MCP</h2>
+        <p class="text-[11px] text-gray-500 mt-1">接入 <code class="text-pink-300">xpzouying/xiaohongshu-mcp</code> 服务，配置后才能发布/搜索/Agent 调用。</p>
+      </div>
+      <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+    <div class="space-y-3">
+      <label class="block">
+        <span class="text-xs text-gray-400">HTTP API Base URL <span class="text-red-400">*</span></span>
+        <input class="input mt-1" id="xhs-mcp-base-url" placeholder="http://localhost:18060" value="${esc(cfg.baseUrl || '')}">
+        <span class="text-[10px] text-gray-500 mt-1 block">xiaohongshu-mcp 服务的 HTTP 端点（/api/v1/* 暴露处）</span>
+      </label>
+      <label class="block">
+        <span class="text-xs text-gray-400">MCP 协议 URL（可选，给 Agent 用）</span>
+        <input class="input mt-1" id="xhs-mcp-mcp-url" placeholder="http://localhost:18060/mcp" value="${esc(cfg.mcpUrl || '')}">
+        <span class="text-[10px] text-gray-500 mt-1 block">Agent CLI 通过 MCP 协议调用时的入口</span>
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" id="xhs-mcp-enabled" ${cfg.enabled !== false ? 'checked' : ''} class="w-3.5 h-3.5">
+        <span>启用</span>
+      </label>
+      <div class="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-[11px] text-gray-400 leading-relaxed">
+        <div class="flex items-center justify-between">
+          <span>当前登录态</span>
+          <span class="text-gray-300">${cfg.loginStatus === 'logged_in' ? '✓ 已登录' : cfg.loginStatus === 'logged_out' ? '✗ 未登录' : '? 未知（未检查）'}</span>
+        </div>
+        <div class="mt-2 flex gap-2">
+          <button class="btn btn-ghost py-1 px-2 text-[11px]" data-action="xhsMcpLoginQr"><i data-lucide="qr-code" class="w-3 h-3"></i>扫码登录</button>
+          <button class="btn btn-ghost py-1 px-2 text-[11px]" data-action="xhsMcpHealth"><i data-lucide="activity" class="w-3 h-3"></i>测试连接</button>
+          <button class="btn btn-ghost py-1 px-2 text-[11px] text-red-300" data-action="xhsMcpResetLogin"><i data-lucide="log-out" class="w-3 h-3"></i>重置登录</button>
+        </div>
+        <div id="xhs-mcp-qr-result" class="mt-2"></div>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button class="btn btn-ghost py-1.5" data-action="closeModal">取消</button>
+      <button class="btn btn-primary py-1.5" data-action="saveXhsMcpConfig">保存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  initIcons(modal);
+}
+
+export async function saveXhsMcpConfig() {
+  try {
+    const baseUrl = document.getElementById('xhs-mcp-base-url').value.trim();
+    const mcpUrl = document.getElementById('xhs-mcp-mcp-url').value.trim();
+    const enabled = document.getElementById('xhs-mcp-enabled').checked;
+    if (!baseUrl) { toast('Base URL 必填', 'error'); return; }
+    const result = await localApi('xhs-mcp/config', { method: 'POST', body: { baseUrl, mcpUrl, enabled } });
+    const health = result?.health;
+    if (health?.healthy) {
+      toast(`已保存，服务在线（${result.loginStatus || 'unknown'}）`, 'success');
+    } else if (enabled) {
+      toast(`已保存，但服务连接失败：${health?.error || '未知'}`, 'error');
+    } else {
+      toast('已保存（已禁用）', 'success');
+    }
+    document.querySelector('.modal-mask')?.remove();
+    await renderSettings();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function xhsMcpHealth() {
+  try {
+    const result = await localApi('xhs-mcp/health');
+    if (result?.healthy) {
+      toast(`服务在线 · ${result.loginStatus || 'unknown'}`, 'success');
+    } else {
+      toast(`服务不可用：${result?.error || '未知'}`, 'error');
+    }
+    await renderSettings();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function xhsMcpLoginQr() {
+  const resultEl = document.getElementById('xhs-mcp-qr-result');
+  if (resultEl) resultEl.innerHTML = '<span class="text-gray-500 text-[11px]">获取二维码中…</span>';
+  try {
+    const result = await localApi('xhs-mcp/login/qrcode');
+    const data = result?.data || result;
+    if (data?.img) {
+      if (resultEl) resultEl.innerHTML = `<img src="${data.img}" class="w-40 h-40 mx-auto rounded border border-white/10" /><div class="text-[10px] text-gray-500 text-center mt-1">用小红书 App 扫码</div>`;
+    } else if (data?.is_logged_in) {
+      if (resultEl) resultEl.innerHTML = '<div class="text-emerald-300 text-[11px] text-center">已登录，无需扫码</div>';
+    } else {
+      throw new Error('未返回二维码');
+    }
+  } catch (e) {
+    if (resultEl) resultEl.innerHTML = `<div class="text-red-400 text-[11px]">${esc(e.message)}</div>`;
+  }
+}
+
+export async function xhsMcpResetLogin() {
+  if (!confirm('确定重置登录？xhs-mcp 会清掉 cookies，下次操作前需要重新扫码。')) return;
+  try {
+    await localApi('xhs-mcp/login/cookies', { method: 'DELETE' });
+    toast('已重置登录态', 'success');
+    await renderSettings();
   } catch (e) { toast(e.message, 'error'); }
 }
 
