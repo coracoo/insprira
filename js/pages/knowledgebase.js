@@ -825,106 +825,23 @@ let currentWersssMp = ''; // 空 = 显示全部
 let currentWersssQuery = ''; // 搜索关键词
 let wersssSearchTimer = null;
 let wersssBodyScrollStyle = ''; // 保存打开弹窗前的 body overflow
-let wersssQrTimer = null;
 
 export async function renderWersss() {
-  try {
-    const status = await localApi('wersss/status');
-    if (status.configured && status.enabled && (!status.wxAuthorized || status.tokenExpired)) {
-      await showWersssQrModal(status);
-      return;
-    }
-  } catch (e) {
-    console.warn('检查 WeRss 状态失败:', e.message);
-  }
+  // 配置入口已在设置页；本函数只负责展示订阅/文章
   await Promise.all([loadWersssStatus(), loadWersssSubs(), loadWersssArticles()]);
   bindWersssSearch();
 }
 
-// 强制弹出扫码授权窗口（"重新授权"按钮调用）
+// 兼容旧 import（如有遗漏调用）：现在配置走设置页，本函数无操作
+export async function openWersssConfig() {
+  toast('WeRss 配置已迁移到设置页 → 外部服务接入', 'info');
+}
+export async function saveWersssConfig() { /* no-op，保留 export 防止旧调用挂掉 */ }
 export async function forceWersssQr() {
-  try {
-    const status = await localApi('wersss/status');
-    await showWersssQrModal(status);
-  } catch (e) {
-    console.warn('打开 WeRss 扫码失败:', e.message);
-  }
+  toast('WeRss 重新授权已迁移到设置页 → 外部服务接入', 'info');
 }
-
-async function showWersssQrModal(status) {
-  const existing = document.getElementById('wersss-qr-modal');
-  if (existing) existing.remove();
-  const modal = document.createElement('div');
-  modal.id = 'wersss-qr-modal';
-  modal.className = 'modal-mask';
-  modal.innerHTML = `
-    <div class="modal" style="max-width:380px">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold">WeRss 授权已过期</h2>
-        <button class="btn btn-ghost py-1 px-2" data-action="closeWersssQrModal"><i data-lucide="x" class="w-4 h-4"></i></button>
-      </div>
-      <p class="text-xs text-gray-400 mb-4">${esc(status.message || '请使用微信扫描下方二维码重新授权')}</p>
-      <div class="flex justify-center mb-4">
-        <div class="text-sm text-gray-500" id="wersss-qr-img-placeholder">加载中…</div>
-      </div>
-      <div class="text-center text-xs text-gray-500 mb-4" id="wersss-qr-status-text">等待扫码…</div>
-      <div class="flex justify-center gap-2">
-        <button class="btn btn-primary" data-action="refreshWersssQr">刷新二维码</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  initIcons(modal);
-  startWersssQrPolling();
-  // 触发一次 QR 生成并显示（只在此处调用，不要在轮询里重复调）
-  await refreshWersssQr();
-}
-
-export function closeWersssQrModal() {
-  if (wersssQrTimer) { clearInterval(wersssQrTimer); wersssQrTimer = null; }
-  document.getElementById('wersss-qr-modal')?.remove();
-}
-
-export async function refreshWersssQr() {
-  try {
-    const { data, error } = await localApi('wersss/qr/start', { method: 'POST' });
-    if (error) throw new Error(error);
-    // 用同域代理 URL，避免跨域 Opaque Response Blocking
-    const imgSrc = '/api/_/wersss/qr/proxy';
-    const placeholder = document.getElementById('wersss-qr-img-placeholder');
-    const existingImg = document.querySelector('#wersss-qr-modal img');
-    if (existingImg) {
-      existingImg.src = imgSrc;
-    } else if (placeholder) {
-      const img = document.createElement('img');
-      img.src = imgSrc;
-      img.alt = 'WeRss 授权二维码';
-      img.className = 'rounded-lg border border-white/10';
-      img.style = 'max-width:280px';
-      placeholder.replaceWith(img);
-    }
-  } catch (e) {
-    const placeholder = document.getElementById('wersss-qr-img-placeholder');
-    if (placeholder) placeholder.textContent = '二维码加载失败，请刷新';
-  }
-}
-
-function startWersssQrPolling() {
-  if (wersssQrTimer) clearInterval(wersssQrTimer);
-  wersssQrTimer = setInterval(async () => {
-    try {
-      const { data: status, error } = await localApi('wersss/status');
-      if (error || !status) return;
-      const statusText = document.getElementById('wersss-qr-status-text');
-      if (!status.wxAuthorized) {
-        if (statusText) statusText.textContent = '等待扫码…';
-        return;
-      }
-      if (statusText) statusText.textContent = '授权成功，即将刷新…';
-      setTimeout(() => { closeWersssQrModal(); renderWersss(); }, 1000);
-    } catch (e) { /* ignore */ }
-  }, 3000);
-}
+export function closeWersssQrModal() { document.getElementById('wersss-qr-modal')?.remove(); }
+export async function refreshWersssQr() { /* no-op */ }
 
 function bindWersssSearch() {
   const input = document.getElementById('wersss-search-input');
@@ -1075,53 +992,6 @@ export async function prefetchWersss() {
     } else {
       toast(`完成：${result.done}/${result.total} 篇${result.failed ? `，失败 ${result.failed}` : ''}`, result.failed ? 'info' : 'success');
     }
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-export async function openWersssConfig() {
-  let cfg = { configured: false, baseUrl: '', username: '' };
-  try { cfg = { ...cfg, ...(await localApi('wersss/config')) }; } catch {}
-  const modal = document.createElement('div');
-  modal.className = 'modal-mask';
-  modal.innerHTML = `<div class="modal" style="max-width:520px">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold">配置 WeRss 接入</h2>
-      <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
-    </div>
-    <div class="space-y-3">
-      <p class="text-[11px] text-gray-500">填写已部署的 we-mp-rss 服务地址和账号密码。保存时会自动测试登录。</p>
-      <label class="block">
-        <span class="text-xs text-gray-400">Base URL</span>
-        <input class="input mt-1" id="wersss-base-url" placeholder="http://127.0.0.1:18001" value="${esc(cfg.baseUrl || '')}">
-      </label>
-      <label class="block">
-        <span class="text-xs text-gray-400">用户名</span>
-        <input class="input mt-1" id="wersss-username" value="${esc(cfg.username || '')}">
-      </label>
-      <label class="block">
-        <span class="text-xs text-gray-400">密码 ${cfg.configured ? '（留空表示不修改）' : ''}</span>
-        <input class="input mt-1" id="wersss-password" type="password" autocomplete="new-password" placeholder="${cfg.configured ? '••••••' : ''}">
-      </label>
-    </div>
-    <div class="flex justify-end gap-2 mt-5">
-      <button class="btn btn-ghost py-1.5" data-action="closeModal">取消</button>
-      <button class="btn btn-primary py-1.5" data-action="saveWersssConfig">保存</button>
-    </div>
-  </div>`;
-  document.body.appendChild(modal);
-  initIcons(modal);
-}
-
-export async function saveWersssConfig() {
-  try {
-    const baseUrl = document.getElementById('wersss-base-url').value.trim();
-    const username = document.getElementById('wersss-username').value.trim();
-    const password = document.getElementById('wersss-password').value;
-    if (!baseUrl || !username) { toast('Base URL 和用户名必填', 'error'); return; }
-    await localApi('wersss/config', { method: 'POST', body: { baseUrl, username, password, enabled: true } });
-    toast('已保存并验证通过', 'success');
-    document.querySelector('.modal-mask')?.remove();
-    renderWersss();
   } catch (e) { toast(e.message, 'error'); }
 }
 
