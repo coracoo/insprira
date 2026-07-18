@@ -152,29 +152,134 @@ export async function checkSkillUpdates(showToast = true) {
 }
 
 export async function updateCommunitySkillsUi() {
-  const button = document.getElementById('skill-update-button');
-  if (button) {
-    button.disabled = true;
-    button.innerHTML = '<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>更新中…';
-    initIcons(button);
+  if (!skillUpdateStatus || !skillUpdateStatus.available) {
+    toast('当前没有可应用的更新', 'info');
+    return;
   }
-  try {
-    const result = await localApi('skills/update', { method: 'POST', body: {} });
-    skillUpdateStatus = { ...result, available: false };
-    await loadSkills(true);
-    document.getElementById('skill-local-count').textContent = `${skillCache.length} 个已下载`;
-    filterSkills();
-    renderSkillUpdateStatus();
-    toast(result.updated ? `Skill 更新完成，新增 ${result.addedSlugs.length} 个` : 'Skill 已是最新版本', 'success');
-  } catch (e) {
-    toast(e.message, 'error');
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.innerHTML = '<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新';
-      initIcons(button);
+  openSkillUpdateModal(skillUpdateStatus);
+}
+
+function openSkillUpdateModal(status) {
+  // 默认勾选：新增 ✓、修改 ✓、删除 ✗（删除破坏性，需用户主动勾）
+  const state = {
+    add: new Set(status.addedSlugs || []),
+    change: new Set(status.changedSlugs || []),
+    remove: new Set(),  // 删除默认不勾
+  };
+  const modal = document.createElement('div');
+  modal.className = 'modal-mask';
+  modal.innerHTML = `<div class="modal" style="max-width:680px;max-height:85vh;overflow-y:auto" data-action="stopPropagation">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold flex items-center gap-2"><i data-lucide="git-compare" class="w-5 h-5 text-amber-400"></i>Skill 更新明细</h2>
+        <p class="text-[11px] text-gray-500 mt-1">勾选要应用的变更，未勾选的保持本地状态不变。</p>
+      </div>
+      <button class="modal-close" data-action="closeModal">×</button>
+    </div>
+    <div id="skill-update-list" class="space-y-3 mb-4"></div>
+    <div class="flex items-center justify-between gap-3 pt-3 border-t border-white/10">
+      <div class="text-[11px] text-gray-500" id="skill-update-summary"></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost py-1.5 text-xs" data-action="closeModal">取消</button>
+        <button class="btn btn-primary py-1.5 text-xs" id="skill-update-apply" disabled><i data-lucide="download" class="w-3.5 h-3.5"></i>应用选中</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  initIcons(modal);
+
+  const list = modal.querySelector('#skill-update-list');
+  const renderList = () => {
+    const sections = [
+      { key: 'add',    label: '新增', icon: 'plus-circle',  color: 'text-emerald-400', slugs: status.addedSlugs || [] },
+      { key: 'change', label: '修改', icon: 'pencil-line',  color: 'text-amber-400',   slugs: status.changedSlugs || [] },
+      { key: 'remove', label: '删除', icon: 'minus-circle', color: 'text-red-400',     slugs: status.removedSlugs || [] },
+    ];
+    list.innerHTML = sections.map(section => {
+      if (!section.slugs.length) {
+        return `<div class="text-[11px] text-gray-600 px-1">${section.label}：0</div>`;
+      }
+      return `<div>
+        <div class="text-[11px] text-gray-400 mb-1.5 flex items-center gap-1.5">
+          <i data-lucide="${section.icon}" class="w-3 h-3 ${section.color}"></i>
+          <span class="${section.color}">${section.label}</span>
+          <span class="text-gray-600">(${section.slugs.length})</span>
+          <button class="ml-auto text-[10px] text-gray-500 hover:text-gray-300" data-skill-toggle-section="${section.key}">全选/反选</button>
+        </div>
+        <div class="space-y-1">
+          ${section.slugs.map(slug => {
+            const checked = state[section.key].has(slug);
+            return `<label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/[0.04] cursor-pointer text-xs">
+              <input type="checkbox" data-skill-section="${section.key}" data-skill-slug="${esc(slug)}" ${checked ? 'checked' : ''} class="w-3.5 h-3.5 rounded">
+              <code class="${section.key === 'remove' ? 'text-red-300' : section.key === 'add' ? 'text-emerald-300' : 'text-amber-300'}">${esc(slug)}</code>
+              ${section.key === 'remove' ? '<span class="text-[10px] text-red-400/70 ml-1">本地将被删除</span>' : ''}
+            </label>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
+    initIcons(list);
+
+    list.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.onchange = () => {
+        const section = cb.dataset.skillSection;
+        const slug = cb.dataset.skillSlug;
+        if (cb.checked) state[section].add(slug);
+        else state[section].delete(slug);
+        updateSummary();
+      };
+    });
+    list.querySelectorAll('[data-skill-toggle-section]').forEach(btn => {
+      btn.onclick = () => {
+        const section = btn.dataset.skillToggleSection;
+        const sectionSlugs = sections.find(s => s.key === section).slugs;
+        const allChecked = sectionSlugs.every(s => state[section].has(s));
+        sectionSlugs.forEach(s => allChecked ? state[section].delete(s) : state[section].add(s));
+        renderList();
+        updateSummary();
+      };
+    });
+  };
+  const updateSummary = () => {
+    const total = state.add.size + state.change.size + state.remove.size;
+    modal.querySelector('#skill-update-summary').textContent =
+      `选中 ${total} 项：新增 ${state.add.size} · 修改 ${state.change.size} · 删除 ${state.remove.size}`;
+    modal.querySelector('#skill-update-apply').disabled = total === 0;
+  };
+
+  renderList();
+  updateSummary();
+
+  modal.querySelector('[data-action=closeModal]').onclick = () => modal.remove();
+  modal.querySelector('#skill-update-apply').onclick = async () => {
+    const applyBtn = modal.querySelector('#skill-update-apply');
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = '<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>应用中…';
+    initIcons(applyBtn);
+    try {
+      const result = await localApi('skills/update', {
+        method: 'POST',
+        body: {
+          add: [...state.add],
+          change: [...state.change],
+          remove: [...state.remove],
+        },
+      });
+      modal.remove();
+      skillUpdateStatus = { ...result, available: false };
+      await loadSkills(true);
+      document.getElementById('skill-local-count').textContent = `${skillCache.length} 个已下载`;
+      filterSkills();
+      renderSkillUpdateStatus();
+      const a = result.applied || { add: 0, change: 0, remove: 0 };
+      toast(`Skill 更新完成：新增 ${a.add} · 修改 ${a.change} · 删除 ${a.remove}`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+      applyBtn.disabled = false;
+      applyBtn.innerHTML = '<i data-lucide="download" class="w-3.5 h-3.5"></i>应用选中';
+      initIcons(applyBtn);
     }
-  }
+  };
 }
 
 export async function openSkillDetail(slug) {
