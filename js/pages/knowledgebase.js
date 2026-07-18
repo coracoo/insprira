@@ -859,26 +859,34 @@ function bindWersssSearch() {
 async function loadWersssStatus() {
   const dot = document.getElementById('wersss-status-dot');
   const text = document.getElementById('wersss-status-text');
+  const tabDot = document.getElementById('wersss-tab-dot');
   if (!dot || !text) return;
+  // 统一状态色 + label
+  const apply = (color, label, title) => {
+    dot.className = `inline-block w-2 h-2 rounded-full bg-${color} mr-1.5`;
+    if (tabDot) {
+      tabDot.className = `inline-block w-1.5 h-1.5 rounded-full bg-${color} ml-1.5 align-middle`;
+      tabDot.title = title || label;
+    }
+  };
   try {
     const cfg = await localApi('wersss/config');
     if (!cfg.configured) {
-      dot.className = 'inline-block w-2 h-2 rounded-full bg-gray-500 mr-1.5';
+      apply('gray-500', '未配置', '未配置');
       text.textContent = '未配置';
       return;
     } else if (!cfg.enabled) {
-      dot.className = 'inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5';
+      apply('amber-400', '已停用', '已停用');
       text.textContent = `已停用 · ${cfg.baseUrl}`;
       return;
     }
-    // 也拿 status 看 token 是否过期
     const status = await localApi('wersss/status');
     if (status.tokenExpired) {
-      dot.className = 'inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5';
+      apply('red-400', 'Token 已过期', 'Token 已过期');
       const exp = status.tokenExpiresAt ? new Date(status.tokenExpiresAt).toLocaleString('zh-CN') : '';
       text.textContent = `Token 已过期 ${exp ? '· ' + exp : ''}`;
     } else {
-      dot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5';
+      apply('emerald-400', '正常', `${cfg.username} @ ${cfg.baseUrl}`);
       text.textContent = `${cfg.username} @ ${cfg.baseUrl}`;
     }
   } catch (e) {
