@@ -52,21 +52,42 @@ export async function renderSettings() {
       xhsPill.innerHTML = `<i data-lucide="${configured ? 'check' : 'minus'}" class="w-3 h-3"></i>${label}`;
       if (xhsText) xhsText.textContent = configured ? `接入：${loginStatus}` : '未配置';
     }
-    // WeRss pill：真实状态
+    // WeRss pill：先用 status 快速显示未配置/已配置，已配置则异步拉详细状态
     const wersssPill = document.getElementById('wersss-status-pill');
     const wersssText = document.getElementById('wersss-status-text');
     if (wersssPill) {
       const configured = !!status.wersssConfigured;
-      const tokenValid = !!status.wersssTokenValid;
-      let label = '未配置';
-      let tone = 'pill-gray';
-      if (configured) {
-        if (tokenValid) { label = '已授权'; tone = 'pill-green'; }
-        else { label = '需重新授权'; tone = 'pill-hot'; }
+      const enabled = !!status.wersssEnabled;
+      if (!configured || !enabled) {
+        wersssPill.className = 'pill pill-gray';
+        wersssPill.innerHTML = '<i data-lucide="minus" class="w-3 h-3"></i>未配置';
+        if (wersssText) wersssText.textContent = '未配置';
+      } else {
+        // 占位「检查中」，避免空白
+        wersssPill.className = 'pill pill-gray';
+        wersssPill.innerHTML = '<i data-lucide="loader" class="w-3 h-3 animate-spin"></i>检查中';
+        if (wersssText) wersssText.textContent = '检查服务状态…';
+        // 异步拉详细
+        localApi('wersss/status').then(detail => {
+          let label, tone;
+          if (detail.serviceReachable === false) {
+            label = 'URL 断联'; tone = 'pill-hot';
+          } else if (detail.tokenExpired || detail.wxAuthorized === false) {
+            label = '需重新授权'; tone = 'pill-amber';
+          } else {
+            label = '正常'; tone = 'pill-green';
+          }
+          wersssPill.className = `pill ${tone}`;
+          wersssPill.innerHTML = `<i data-lucide="${tone === 'pill-green' ? 'check' : 'alert-triangle'}" class="w-3 h-3"></i>${label}`;
+          if (wersssText) wersssText.textContent = detail.message || label;
+          initIcons(wersssPill);
+        }).catch(() => {
+          wersssPill.className = 'pill pill-hot';
+          wersssPill.innerHTML = '<i data-lucide="alert-triangle" class="w-3 h-3"></i>URL 断联';
+          if (wersssText) wersssText.textContent = '服务连接失败';
+          initIcons(wersssPill);
+        });
       }
-      wersssPill.className = `pill ${tone}`;
-      wersssPill.innerHTML = `<i data-lucide="${configured ? 'check' : 'minus'}" class="w-3 h-3"></i>${label}`;
-      if (wersssText) wersssText.textContent = configured ? (tokenValid ? 'token 有效' : 'token 过期或失效') : '未配置';
     }
     document.getElementById('api-detail').textContent = '配置变更后需重启服务生效';
     await loadQuota();

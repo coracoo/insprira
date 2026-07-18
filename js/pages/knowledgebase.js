@@ -861,7 +861,7 @@ async function loadWersssStatus() {
   const text = document.getElementById('wersss-status-text');
   const tabDot = document.getElementById('wersss-tab-dot');
   if (!dot || !text) return;
-  // 统一状态色 + label
+  // 颜色语义：红=url 断联 / 黄=状态异常(token 过期、未授权) / 绿=正常 / 灰=未配置/已停用
   const apply = (color, label, title) => {
     dot.className = `inline-block w-2 h-2 rounded-full bg-${color} mr-1.5`;
     if (tabDot) {
@@ -876,21 +876,26 @@ async function loadWersssStatus() {
       text.textContent = '未配置';
       return;
     } else if (!cfg.enabled) {
-      apply('amber-400', '已停用', '已停用');
+      apply('gray-500', '已停用', '已停用');
       text.textContent = `已停用 · ${cfg.baseUrl}`;
       return;
     }
     const status = await localApi('wersss/status');
-    if (status.tokenExpired) {
-      apply('red-400', 'Token 已过期', 'Token 已过期');
-      const exp = status.tokenExpiresAt ? new Date(status.tokenExpiresAt).toLocaleString('zh-CN') : '';
-      text.textContent = `Token 已过期 ${exp ? '· ' + exp : ''}`;
+    if (status.serviceReachable === false) {
+      apply('red-400', 'URL 断联', '服务连接失败');
+      text.textContent = `服务连接失败 · ${cfg.baseUrl}`;
+    } else if (status.tokenExpired || status.wxAuthorized === false) {
+      apply('amber-400', '状态异常', status.message || 'Token 过期或未授权');
+      const exp = status.tokenExpiresAt && status.tokenExpired
+        ? new Date(status.tokenExpiresAt).toLocaleString('zh-CN') : '';
+      text.textContent = `${status.message || '需重新授权'}${exp ? ' · ' + exp : ''}`;
     } else {
       apply('emerald-400', '正常', `${cfg.username} @ ${cfg.baseUrl}`);
       text.textContent = `${cfg.username} @ ${cfg.baseUrl}`;
     }
   } catch (e) {
-    text.textContent = '读取配置失败';
+    apply('red-400', 'URL 断联', '读取配置失败');
+    text.textContent = '读取配置失败：' + e.message;
   }
 }
 
