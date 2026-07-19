@@ -41,6 +41,8 @@ export async function renderKnowledgebase() {
     syncKbTabHighlight('obsidian');
     const libCount = LS.get('library', []).length;
     document.getElementById('kb-lib-count').textContent = libCount;
+    // 异步刷新 WeRss tab 状态灯（不阻塞主体渲染；切到 wersss tab 时再细刷订阅/文章）
+    loadWersssStatus().catch(() => {});
     if (!cfg.sourceType) {
       document.getElementById('kb-entries').innerHTML = '';
       document.getElementById('kb-empty').classList.remove('hidden');
