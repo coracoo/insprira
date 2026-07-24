@@ -112,6 +112,7 @@ const SKILLS_NEW_BADGE_MS = 7 * 24 * 60 * 60 * 1000;
 // callLlm / callLlmJson / execFileAsync）此时已可用（hoisted 或前文 const）
 const skillsLib = require('./lib/skills').make({
   SKILLS_ROOT, SKILLS_REPO_ROOT, SKILLS_GITHUB_REPO, SKILLS_NEW_BADGE_MS,
+  CUSTOM_SKILLS_ROOT: path.join(DATA_ROOT, 'skills', 'custom'),
   rootDir: __dirname,
   HOT_SOURCE_CONFIG: () => HOT_SOURCE_CONFIG,
   cronTimers: () => cronTimers,
@@ -125,6 +126,8 @@ const {
   classifyAllSkills, listSkills, invalidateSkillCache, getSkill,
   localSkillManifest, remoteSkillManifest, compareSkillManifests,
   communitySkillUpdateStatus, updateCommunitySkills,
+  listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
+  listHubSkills, installHubSkill, listSkillTemplates, generateSkillFromTemplate,
 } = skillsLib;
 const agentLib = require('./lib/agent').make({
   rootDir: __dirname,
@@ -763,6 +766,9 @@ async function handleLocalApi(req, res, url) {
   if (await require('./lib/routes/skills').tryRoute(req, res, url, {
     listSkills, getSkill, getSkillSourceBinding, bindSkillToSource,
     classifyAllSkills, communitySkillUpdateStatus, updateCommunitySkills,
+    listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
+    listHubSkills, installHubSkill,
+    listSkillTemplates, generateSkillFromTemplate,
   })) {
     return true;
   }

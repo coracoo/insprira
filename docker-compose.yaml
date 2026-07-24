@@ -1,13 +1,54 @@
+# 灵感熔炉 · 开发用 docker compose
+#
+# 一行启动：
+#   docker compose up -d
+#
+# 设计要点：
+#   · 容器内 HOME=/data/agent-home，让 claude/codex/kimi 的 session 写到
+#     data 卷里，跟着项目迁移走（不污染宿主 ~/.claude 等项目历史）
+#   · 凭证和配置从宿主 /seed/（readonly）由 entrypoint 同步到 agent-home，
+#     宿主重新 login 后下次容器启动自动跟上
+#   · CLI 二进制仍用宿主 npm-global / kimi-code（架构一致才能跑）
+#
+# 前提：
+#   · Linux x86_64 宿主，已装 claude/codex/kimi（npm 全局 + kimi 官方脚本）
+#   · 镜像 insprira:latest 已本地构建（首次：docker compose build）
+
 services:
   insprira:
-    image: ghcr.io/coracoo/insprira:latest
-    container_name: insprira
+    image: insprira:latest
+    container_name: insprira-dev
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    command: ["node", "--watch", "server.js"]
     env_file:
       - .env
     environment:
+      # 关键：HOME 重定向到 data，CLI 的 ~/.xxx 都跟 data 卷走
+      HOME: /data/agent-home
       HOST: 0.0.0.0
+      DATA_DIR: /data
+      NODE_ENV: development
+      AGENT_ADAPTER: local
+      CLAUDE_BIN: /host/npm-global/bin/claude
+      CODEX_BIN: /host/npm-global/bin/codex
+      KIMI_BIN: /host/kimi-bin/kimi
     volumes:
+      # 源码（dev 热重启）+ entrypoint 脚本
+      - ./:/app
+      - /app/node_modules
+      # 数据持久化（含 agent-home，CLI session 跟这走）
       - ./data:/data
+      # CLI 二进制（npm 全局：claude + codex；kimi 单独）
+      - ${HOME}/.npm-global:/host/npm-global:ro
+      - ${HOME}/.kimi-code/bin:/host/kimi-bin:ro
+      # 种子：宿主凭证/配置（readonly），entrypoint 同步到 /data/agent-home
+      - ${HOME}/.claude.json:/seed/claude.json:ro
+      - ${HOME}/.claude/settings.json:/seed/claude-settings.json:ro
+      - ${HOME}/.codex/auth.json:/seed/codex-auth.json:ro
+      - ${HOME}/.codex/config.toml:/seed/codex-config.toml:ro
+      - ${HOME}/.kimi-code/credentials:/seed/kimi-credentials:ro
+      - ${HOME}/.kimi-code/config.toml:/seed/kimi-config.toml:ro
+    # 共享宿主网络：claude 读 settings.json 里的 ANTHROPIC_BASE_URL=http://127.0.0.1:xxxx
+    # 本地代理时，容器内 127.0.0.1 必须指向宿主。Linux 专属。
+    network_mode: host

@@ -756,29 +756,83 @@
   <div class="page-header">
     <div>
       <div class="page-header-title"><i data-lucide="blocks" class="w-5 h-5 text-purple-400"></i>Skill 中心</div>
-      <div class="page-header-sub">本地 RedFox 社区 Skills，可查看说明并交给 Agent 执行</div>
+      <div class="page-header-sub">RedFox 社区、Anthropic Hub、自定义 Skill 与规范模板</div>
     </div>
     <div class="page-header-actions">
       <span class="text-[11px] text-gray-500" id="skill-update-status">正在检查更新…</span>
       <button class="btn btn-ghost py-1.5 text-xs" data-action="checkSkillUpdates"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>检查更新</button>
       <button class="btn btn-primary py-1.5 text-xs hidden" id="skill-update-button" data-action="updateCommunitySkills"><i data-lucide="git-compare" class="w-3.5 h-3.5"></i>查看更新</button>
       <button class="btn btn-ghost py-1.5 text-xs" data-action="reclassifySkills" title="按 slug 规则重写所有 skill 分类（毫秒级，不用 LLM）"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>重新整理分类</button>
-      <span class="pill pill-green" id="skill-local-count">读取中…</span>
     </div>
   </div>
-  <div class="page-section space-y-4">
+  <div class="flex items-center gap-1 border-b border-white/10" id="skill-tabs">
+    <button class="skill-tab active px-3 py-1.5 text-sm rounded-md" data-skill-tab="redfox"><i data-lucide="flame" class="w-3.5 h-3.5 inline -mt-0.5"></i> RedFox 社区</button>
+    <button class="skill-tab px-3 py-1.5 text-sm rounded-md text-gray-400" data-skill-tab="hub"><i data-lucide="globe" class="w-3.5 h-3.5 inline -mt-0.5"></i> Skill Hub</button>
+    <button class="skill-tab px-3 py-1.5 text-sm rounded-md text-gray-400" data-skill-tab="custom"><i data-lucide="user-cog" class="w-3.5 h-3.5 inline -mt-0.5"></i> 我的 Skill</button>
+    <button class="skill-tab px-3 py-1.5 text-sm rounded-md text-gray-400" data-skill-tab="template"><i data-lucide="book-template" class="w-3.5 h-3.5 inline -mt-0.5"></i> 模板规范</button>
+  </div>
+
+  <!-- RedFox 社区 -->
+  <div id="skill-pane-redfox" class="space-y-4">
     <div class="flex gap-2">
       <input class="input search-input max-w-xl" id="skillSearch" placeholder="搜索 Skill 名称、描述或平台…" />
       <select class="input" id="skillCategory" style="width:auto">
         <option value="all">全部分类</option>
-        <option value="热点">热点</option>
+        <option value="热榜">热榜</option>
+        <option value="信息源">信息源</option>
+        <option value="检索">检索</option>
         <option value="创作">创作</option>
         <option value="分析">分析</option>
-        <option value="检索">检索</option>
-        <option value="生成工具">生成工具</option>
+        <option value="媒体">媒体</option>
+        <option value="综合">综合</option>
       </select>
+      <span class="pill pill-green ml-auto" id="skill-local-count">读取中…</span>
     </div>
     <div id="skill-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+  </div>
+
+  <!-- Skill Hub (Anthropic 官方) -->
+  <div id="skill-pane-hub" class="hidden space-y-4">
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-gray-500">来自 <code class="text-purple-300">github.com/anthropics/skills</code>，可一键安装到「我的 Skill」</p>
+      <button class="btn btn-ghost py-1.5 text-xs" data-action="loadHubSkills"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新</button>
+    </div>
+    <div id="hub-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div class="text-center text-gray-500 py-8 text-sm">点击「刷新」加载 Anthropic 官方 Skill 清单</div>
+    </div>
+  </div>
+
+  <!-- 我的 Skill -->
+  <div id="skill-pane-custom" class="hidden space-y-4">
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-gray-500">存于 <code class="text-purple-300">data/skills/custom/</code>，迁移 data 卷即带走</p>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost py-1.5 text-xs" data-action="refreshCustomSkills"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新</button>
+        <button class="btn btn-primary py-1.5 text-xs" data-action="newCustomSkill"><i data-lucide="plus" class="w-3.5 h-3.5"></i>新建 Skill</button>
+      </div>
+    </div>
+    <div id="custom-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div class="text-center text-gray-500 py-8 text-sm">读取中…</div>
+    </div>
+  </div>
+
+  <!-- 模板规范 -->
+  <div id="skill-pane-template" class="hidden space-y-4">
+    <div class="glass rounded-xl p-4">
+      <h3 class="text-sm font-semibold mb-2 flex items-center gap-1.5"><i data-lucide="book-open" class="w-4 h-4 text-amber-400"></i>SKILL.md 规范</h3>
+      <p class="text-xs text-gray-400 mb-2">每个 skill 是一个目录，根目录有 <code class="text-purple-300">SKILL.md</code>，YAML frontmatter 含 <code class="text-purple-300">name</code> 和 <code class="text-purple-300">description</code> 两个字段。</p>
+      <pre class="text-[11px] bg-black/30 rounded-md p-3 overflow-x-auto text-gray-300">---
+name: my-skill
+description: 描述这个 skill 做什么、Claude 什么时候应该用它。
+---
+
+# 标题
+
+正文：工作流、约束、引用等。</pre>
+      <p class="text-[11px] text-gray-500 mt-2">完整规范：<a href="https://agentskills.io/specification" target="_blank" rel="noopener" class="text-purple-300 hover:underline">agentskills.io/specification</a></p>
+    </div>
+    <h3 class="text-sm font-semibold">从模板创建</h3>
+    <div id="template-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
   </div>
 </div>
 </template>

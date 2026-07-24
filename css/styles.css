@@ -283,6 +283,10 @@
   .result-field-hero{padding:.85rem 1rem;border-radius:10px;border:1px solid rgba(251,191,36,.18);background:linear-gradient(180deg,rgba(251,191,36,.04),rgba(251,191,36,.01));box-shadow:0 0 0 1px rgba(251,191,36,.04) inset, 0 6px 24px -16px rgba(251,191,36,.3);}
   .result-input-hero{width:100%;background:transparent;border:none;outline:none;font-family:'Manrope','Inter',system-ui,sans-serif;font-weight:700;font-size:1.1rem;line-height:1.45;color:var(--amber,#fde68a);letter-spacing:-.005em;}
   .result-input-hero::placeholder{color:var(--fg-4);font-weight:500;}
+  /* skill 中心 tab */
+  .skill-tab{position:relative;font-weight:500;border-bottom:2px solid transparent;}
+  .skill-tab.active{color:#fde68a;border-bottom-color:#fbbf24;}
+  .skill-tab:hover:not(.active){color:var(--fg-1);}
   /* hotspot collapse — reserve space so result fields don't jump when panel toggles */
   .hotspot-collapse{max-height:0;overflow:hidden;opacity:0;transition:max-height .2s ease, opacity .15s ease, margin .2s ease;}
   .hotspot-collapse.is-open{max-height:320px;opacity:1;margin-bottom:.75rem;}

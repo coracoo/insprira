@@ -31,22 +31,229 @@ export async function renderSkills() {
   try {
     const skills = await loadSkills();
     document.getElementById('skill-local-count').textContent = `${skills.length} 个已下载`;
-    // 分类下拉固定使用 7 类（与 lib/skills.js LLM_SKILL_CATEGORIES 同步）
-    document.getElementById('skillCategory').innerHTML = [
-      '<option value="all">全部分类</option>',
-      '<option value="热榜">热榜</option>',
-      '<option value="信息源">信息源</option>',
-      '<option value="检索">检索</option>',
-      '<option value="创作">创作</option>',
-      '<option value="分析">分析</option>',
-      '<option value="媒体">媒体</option>',
-      '<option value="综合">综合</option>',
-    ].join('');
     filterSkills();
     checkSkillUpdates(false);
+    bindSkillTabs();
+    // 默认渲染 custom + template（首屏可能没人切到，但提前渲染避免空白）
+    renderCustomSkills().catch(() => {});
+    renderSkillTemplates().catch(() => {});
   } catch (e) {
     document.getElementById('skill-grid').innerHTML = `<div class="text-red-400 text-sm">${esc(e.message)}</div>`;
   }
+}
+
+let _skillTabBound = false;
+export function bindSkillTabs() {
+  if (_skillTabBound) return;
+  _skillTabBound = true;
+  document.querySelectorAll('.skill-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.skillTab;
+      document.querySelectorAll('.skill-tab').forEach(b => b.classList.toggle('active', b === btn));
+      ['redfox', 'hub', 'custom', 'template'].forEach(t => {
+        const pane = document.getElementById(`skill-pane-${t}`);
+        if (pane) pane.classList.toggle('hidden', t !== tab);
+      });
+      if (tab === 'hub') renderHubSkills().catch(() => {});
+      if (tab === 'custom') renderCustomSkills().catch(() => {});
+      if (tab === 'template') renderSkillTemplates().catch(() => {});
+    });
+  });
+}
+
+// ========== 我的 Skill ==========
+export async function renderCustomSkills() {
+  const grid = document.getElementById('custom-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">加载中…</div>';
+  try {
+    const skills = await localApi('skills/custom');
+    if (!skills.length) {
+      grid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-8 text-sm">
+        <div class="mb-2">还没有自定义 Skill</div>
+        <button class="btn btn-primary py-1.5 text-xs" data-action="newCustomSkill"><i data-lucide="plus" class="w-3.5 h-3.5"></i>新建 Skill</button>
+      </div>`;
+      initIcons(grid);
+      return;
+    }
+    grid.innerHTML = skills.map(s => `
+      <div class="glass rounded-xl p-4 card cursor-pointer" data-action="editCustomSkill" data-slug="${esc(s.slug)}">
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <div class="text-sm font-semibold flex-1 truncate">${esc(s.title || s.name)}</div>
+          <span class="pill pill-gray !text-[10px] !py-0.5 !px-1.5">${esc(s.slug)}</span>
+        </div>
+        <div class="text-xs text-gray-400 line-clamp-3 mb-3">${esc(s.description || '(无描述)')}</div>
+        <div class="flex gap-1">
+          <button class="btn btn-ghost py-1 text-[11px] flex-1" data-action="editCustomSkill" data-slug="${esc(s.slug)}"><i data-lucide="pencil" class="w-3 h-3"></i>编辑</button>
+          <button class="btn btn-ghost py-1 text-[11px] text-red-300" data-action="deleteCustomSkill" data-slug="${esc(s.slug)}"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+        </div>
+      </div>
+    `).join('');
+    initIcons(grid);
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full text-red-400 text-sm">${esc(e.message)}</div>`;
+  }
+}
+
+export async function newCustomSkill(el, d) {
+  openCustomSkillEditor(null);
+}
+
+export async function editCustomSkill(el, d) {
+  openCustomSkillEditor(d.slug);
+}
+
+export async function deleteCustomSkill(el, d) {
+  if (!confirm(`确定删除 Skill "${d.slug}"？此操作不可撤销。`)) return;
+  try {
+    await localApi(`skills/custom/${encodeURIComponent(d.slug)}`, { method: 'DELETE' });
+    toast('已删除', 'success');
+    await renderCustomSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openCustomSkillEditor(slug) {
+  const isNew = !slug;
+  const init = isNew
+    ? Promise.resolve({ slug: '', name: '', title: '', description: '', content: '# 新 Skill\n\n在这里写工作流和约束。\n' })
+    : localApi(`skills/custom/${encodeURIComponent(slug)}`);
+  init.then(data => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-mask';
+    modal.innerHTML = `<div class="modal" style="max-width:780px;max-height:88vh;overflow-y:auto">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">${isNew ? '新建 Skill' : `编辑 ${esc(slug)}`}</h2>
+        <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-400">slug ${isNew ? '<span class="text-red-400">*</span>' : '(不可改)'}</span>
+            <input class="input mt-1 text-sm" id="cs-slug" value="${esc(data.slug)}" ${isNew ? '' : 'disabled'}>
+            <span class="text-[10px] text-gray-500">2-63 位小写字母/数字/连字符，作为目录名和 Agent /命令</span>
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-400">name</span>
+            <input class="input mt-1 text-sm" id="cs-name" value="${esc(data.name || data.title || '')}">
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-400">description</span>
+          <textarea class="input mt-1 text-sm" id="cs-desc" rows="2">${esc(data.description || '')}</textarea>
+          <span class="text-[10px] text-gray-500">一行描述，Agent 用它判断何时调用此 Skill</span>
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-400">SKILL.md 内容</span>
+          <textarea class="input mt-1 text-sm font-mono" id="cs-content" rows="16" style="font-family:ui-monospace,Menlo,monospace">${esc(data.content || '')}</textarea>
+        </label>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button class="btn btn-ghost py-1.5" data-action="closeModal">取消</button>
+        <button class="btn btn-primary py-1.5" data-action="saveCustomSkill" data-slug="${esc(slug || '')}">${isNew ? '创建' : '保存'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    initIcons(modal);
+  }).catch(e => toast(e.message, 'error'));
+}
+
+export async function saveCustomSkill(el, d) {
+  const slug = document.getElementById('cs-slug').value.trim();
+  const name = document.getElementById('cs-name').value.trim();
+  const description = document.getElementById('cs-desc').value.trim();
+  const content = document.getElementById('cs-content').value;
+  try {
+    if (d.slug) {
+      await localApi(`skills/custom/${encodeURIComponent(d.slug)}`, { method: 'PUT', body: { name, description, content } });
+      toast('已保存', 'success');
+    } else {
+      if (!slug) { toast('slug 必填', 'error'); return; }
+      await localApi('skills/custom', { method: 'POST', body: { slug, name, description, content } });
+      toast('已创建', 'success');
+    }
+    document.querySelector('.modal-mask')?.remove();
+    await renderCustomSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function refreshCustomSkills() {
+  await renderCustomSkills();
+  toast('已刷新', 'success');
+}
+
+// ========== Skill Hub (Anthropic 官方) ==========
+export async function renderHubSkills() {
+  const grid = document.getElementById('hub-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">加载 Anthropic 官方 Skill 清单…</div>';
+  try {
+    const skills = await localApi('skills/hub');
+    if (!skills.length) {
+      grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">清单为空</div>';
+      return;
+    }
+    grid.innerHTML = skills.map(s => `
+      <div class="glass rounded-xl p-4 card">
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <div class="text-sm font-semibold flex-1 truncate">${esc(s.name || s.slug)}</div>
+          <span class="pill pill-gray !text-[10px] !py-0.5 !px-1.5">${esc(s.slug)}</span>
+        </div>
+        <div class="text-xs text-gray-400 line-clamp-3 mb-3 min-h-[3.5em]">${esc(s.description || '(无描述)')}</div>
+        <button class="btn btn-primary py-1 text-[11px] w-full" data-action="installHubSkill" data-slug="${esc(s.slug)}"><i data-lucide="download" class="w-3 h-3"></i>安装到我的 Skill</button>
+      </div>
+    `).join('');
+    initIcons(grid);
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full text-red-400 text-sm">${esc(e.message)}</div>`;
+  }
+}
+
+export async function loadHubSkills() {
+  await renderHubSkills();
+}
+
+export async function installHubSkill(el, d) {
+  const btn = el;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>安装中…'; initIcons(btn); }
+  try {
+    const result = await localApi(`skills/hub/${encodeURIComponent(d.slug)}/install`, { method: 'POST', body: {} });
+    toast(`已安装 ${result.slug}，可在「我的 Skill」查看`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download" class="w-3 h-3"></i>安装到我的 Skill'; initIcons(btn); }
+  }
+}
+
+// ========== 模板 ==========
+export async function renderSkillTemplates() {
+  const grid = document.getElementById('template-grid');
+  if (!grid) return;
+  try {
+    const templates = await localApi('skills/templates');
+    grid.innerHTML = templates.map(t => `
+      <div class="glass rounded-xl p-4 card">
+        <div class="text-sm font-semibold mb-1 flex items-center gap-1.5"><i data-lucide="file-text" class="w-3.5 h-3.5 text-amber-400"></i>${esc(t.name)}</div>
+        <div class="text-xs text-gray-400 line-clamp-3 mb-3 min-h-[3.5em]">${esc(t.description)}</div>
+        <button class="btn btn-ghost py-1 text-[11px] w-full" data-action="generateFromTemplate" data-template="${esc(t.id)}"><i data-lucide="wand-sparkles" class="w-3 h-3"></i>从模板创建</button>
+      </div>
+    `).join('');
+    initIcons(grid);
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full text-red-400 text-sm">${esc(e.message)}</div>`;
+  }
+}
+
+export async function generateFromTemplate(el, d) {
+  const templateId = d.template;
+  const slug = prompt(`从模板「${templateId}」创建，请输入新 Skill 的 slug\n（2-63 位小写字母/数字/连字符）：`, `${templateId}-new`);
+  if (!slug) return;
+  try {
+    await localApi('skills/templates/generate', { method: 'POST', body: { templateId, slug, name: slug } });
+    toast(`已从模板创建 ${slug}`, 'success');
+    // 切到 custom tab
+    document.querySelector('.skill-tab[data-skill-tab="custom"]')?.click();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 export function filterSkills() {
@@ -327,7 +534,10 @@ export function startNewAgentThread() {
   const agentId = document.getElementById('agentProvider')?.value || currentAgentId || '';
   const agentName = agentCache.find(a => a.id === agentId)?.name || '未知 Agent';
   const id = 'thread_' + Date.now();
-  const thread = { id, agentId, agentName, name: '新对话', messages: [], createdAt: Date.now() };
+  // 默认标题：HH.MM（如 14.25）
+  const now = new Date();
+  const defaultName = `${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}`;
+  const thread = { id, agentId, agentName, name: defaultName, messages: [], sessionIds: [], createdAt: Date.now() };
   agentThreads.unshift(thread);
   if (agentThreads.length > 20) agentThreads.pop();
   saveAgentThreads();
@@ -373,6 +583,18 @@ export function deleteAgentThread(threadId) {
   renderAgentMessages();
 }
 
+export async function copySessionId(threadId) {
+  const thread = agentThreads.find(t => t.id === threadId);
+  const sid = thread?.lastSessionId?.sessionId;
+  if (!sid) { toast('该对话没有 session-id', 'error'); return; }
+  try {
+    await navigator.clipboard.writeText(sid);
+    toast(`已复制 session-id: ${sid.slice(0, 8)}…（外部用 ${thread.agentId} --resume 接续）`, 'success');
+  } catch {
+    toast('复制失败，请手动选择', 'error');
+  }
+}
+
 export function renderAgentThreads() {
   const host = document.getElementById('agent-thread-list');
   if (!host) return;
@@ -385,7 +607,10 @@ export function renderAgentThreads() {
   host.innerHTML = myThreads.map(thread => `
     <div class="group flex items-center gap-1 px-2.5 py-2 rounded-lg border cursor-pointer text-xs ${thread.id === currentAgentThreadId ? 'border-amber-500/25 bg-amber-500/10 text-white' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-white/10 hover:bg-white/[0.04]'}" data-action="switchAgentThread" data-id="${thread.id}">
       <span class="flex-1 truncate">${esc(thread.name)}</span>
-      <button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="deleteAgentThread" data-id="${thread.id}" title="删除">
+      ${thread.lastSessionId ? `<button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="copySessionId" data-id="${thread.id}" data-stop-prop title="复制 session-id，可用 ${esc(thread.agentId)} --resume 接续">
+        <i data-lucide="clipboard-copy" class="w-3 h-3"></i>
+      </button>` : ''}
+      <button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="deleteAgentThread" data-id="${thread.id}" data-stop-prop title="删除">
         <i data-lucide="x" class="w-3 h-3"></i>
       </button>
     </div>
@@ -655,9 +880,9 @@ export async function sendAgentMessage() {
   const userMsg = { role: 'user', content: message, timestamp };
   agentMessages.push(userMsg);
   const thread = agentThreads.find(t => t.id === currentAgentThreadId);
-  if (thread && thread.name === '新对话') {
-    thread.name = message.slice(0, 20).replace(/\n/g, ' ') || '新对话';
-    document.getElementById('agent-thread-name').textContent = thread.name;
+  // 默认 HH.MM 标题在首次发消息时保留（不强制改成首句），让用户能按时间定位
+  if (thread && !thread.touched) {
+    thread.touched = true;
   }
   if (thread) thread.messages = agentMessages;
   saveAgentThreads();
@@ -674,6 +899,15 @@ export async function sendAgentMessage() {
       body: { message, mode, agent },
     });
     const assistantMsg = { role: 'assistant', content: result.answer, agentName: result.agentName, timestamp: Date.now() };
+    // 后端从 ~/.xxx/projects/ 扫出的 session-id（resume 用），存到 thread
+    if (thread && result.sessionId) {
+      thread.sessionIds = thread.sessionIds || [];
+      const entry = { agent, sessionId: result.sessionId, ts: Date.now() };
+      thread.sessionIds.push(entry);
+      thread.lastSessionId = entry;
+      saveAgentThreads();
+      renderAgentThreads();
+    }
     agentRuntimeErrors.delete(agent);
     renderAgentProviderStatus(agent);
     agentMessages.push(assistantMsg);
