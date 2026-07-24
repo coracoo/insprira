@@ -54,11 +54,26 @@ export function bindSkillTabs() {
         const pane = document.getElementById(`skill-pane-${t}`);
         if (pane) pane.classList.toggle('hidden', t !== tab);
       });
-      if (tab === 'hub') renderHubSkills().catch(() => {});
+      if (tab === 'hub') {
+        renderHubInstalled().catch(() => {});
+        bindHubSearchInput();
+      }
       if (tab === 'custom') renderCustomSkills().catch(() => {});
       if (tab === 'template') renderSkillTemplates().catch(() => {});
     });
   });
+}
+
+let _hubSearchBound = false;
+function bindHubSearchInput() {
+  if (_hubSearchBound) return;
+  _hubSearchBound = true;
+  const input = document.getElementById('hubSearchInput');
+  if (input) {
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); searchHubSkills(); }
+    });
+  }
 }
 
 // ========== 我的 Skill ==========
@@ -182,34 +197,69 @@ export async function refreshCustomSkills() {
 }
 
 // ========== Skill Hub (Anthropic 官方) ==========
-export async function renderHubSkills() {
-  const grid = document.getElementById('hub-grid');
+// 默认展示已安装；搜索后展示 Anthropic 全部
+export async function renderHubInstalled() {
+  const grid = document.getElementById('hub-installed-grid');
   if (!grid) return;
-  grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">加载 Anthropic 官方 Skill 清单…</div>';
   try {
-    const skills = await localApi('skills/hub');
-    if (!skills.length) {
-      grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8 text-sm">清单为空</div>';
+    const installed = await localApi('skills/hub/installed');
+    const countEl = document.getElementById('hub-installed-count');
+    if (countEl) countEl.textContent = `(${installed.length})`;
+    if (!installed.length) {
+      grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-3 text-xs">还没安装任何 Hub Skill，下方搜索框去 Anthropic 找</div>';
       return;
     }
-    grid.innerHTML = skills.map(s => `
-      <div class="glass rounded-xl p-4 card">
-        <div class="flex items-start justify-between gap-2 mb-2">
-          <div class="text-sm font-semibold flex-1 truncate">${esc(s.name || s.slug)}</div>
-          <span class="pill pill-gray !text-[10px] !py-0.5 !px-1.5">${esc(s.slug)}</span>
+    grid.innerHTML = installed.map(s => `
+      <div class="glass rounded-xl p-3 card">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div class="text-sm font-semibold flex-1 truncate">${esc(s.title || s.name || s.slug)}</div>
+          <span class="pill pill-green !text-[10px] !py-0 !px-1.5">已装</span>
         </div>
-        <div class="text-xs text-gray-400 line-clamp-3 mb-3 min-h-[3.5em]">${esc(s.description || '(无描述)')}</div>
-        <button class="btn btn-primary py-1 text-[11px] w-full" data-action="installHubSkill" data-slug="${esc(s.slug)}"><i data-lucide="download" class="w-3 h-3"></i>安装到我的 Skill</button>
+        <div class="text-xs text-gray-400 line-clamp-2 mb-2 min-h-[2.5em]">${esc(s.description || '(无描述)')}</div>
+        <button class="btn btn-ghost py-1 text-[11px] w-full text-red-300" data-action="uninstallHubSkill" data-slug="${esc(s.slug)}"><i data-lucide="trash-2" class="w-3 h-3"></i>卸载</button>
       </div>
     `).join('');
     initIcons(grid);
   } catch (e) {
-    grid.innerHTML = `<div class="col-span-full text-red-400 text-sm">${esc(e.message)}</div>`;
+    grid.innerHTML = `<div class="col-span-full text-red-400 text-xs">${esc(e.message)}</div>`;
+  }
+}
+
+export async function searchHubSkills() {
+  const grid = document.getElementById('hub-search-grid');
+  if (!grid) return;
+  const q = (document.getElementById('hubSearchInput')?.value || '').trim();
+  if (!q) {
+    grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-3 text-xs">输入关键词后点搜索</div>';
+    return;
+  }
+  grid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-3 text-xs">搜索 "${esc(q)}" 中…</div>`;
+  try {
+    const skills = await localApi(`skills/hub?q=${encodeURIComponent(q)}`);
+    if (!skills.length) {
+      grid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-3 text-xs">无匹配结果</div>`;
+      return;
+    }
+    grid.innerHTML = skills.map(s => `
+      <div class="glass rounded-xl p-3 card">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div class="text-sm font-semibold flex-1 truncate">${esc(s.name || s.slug)}</div>
+          ${s.installed ? '<span class="pill pill-green !text-[10px] !py-0 !px-1.5">已装</span>' : ''}
+        </div>
+        <div class="text-xs text-gray-400 line-clamp-3 mb-2 min-h-[3.5em]">${esc(s.description || '(无描述)')}</div>
+        ${s.installed
+          ? '<button class="btn btn-ghost py-1 text-[11px] w-full" disabled>已安装</button>'
+          : `<button class="btn btn-primary py-1 text-[11px] w-full" data-action="installHubSkill" data-slug="${esc(s.slug)}"><i data-lucide="download" class="w-3 h-3"></i>安装</button>`}
+      </div>
+    `).join('');
+    initIcons(grid);
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full text-red-400 text-xs">${esc(e.message)}</div>`;
   }
 }
 
 export async function loadHubSkills() {
-  await renderHubSkills();
+  await renderHubInstalled();
 }
 
 export async function installHubSkill(el, d) {
@@ -217,14 +267,26 @@ export async function installHubSkill(el, d) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>安装中…'; initIcons(btn); }
   try {
     const result = await localApi(`skills/hub/${encodeURIComponent(d.slug)}/install`, { method: 'POST', body: {} });
-    toast(`已安装 ${result.slug}，可在「我的 Skill」查看`, 'success');
-    // 切到「我的 Skill」tab，让用户立即看到刚装的
-    document.querySelector('.skill-tab[data-skill-tab="custom"]')?.click();
+    toast(`已安装 ${result.slug}`, 'success');
+    await renderHubInstalled();      // 刷新已装列表
+    const q = document.getElementById('hubSearchInput')?.value?.trim();
+    if (q) await searchHubSkills();  // 刷新搜索结果（标记已装）
   } catch (e) {
     toast(e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download" class="w-3 h-3"></i>安装到我的 Skill'; initIcons(btn); }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download" class="w-3 h-3"></i>安装'; initIcons(btn); }
   }
+}
+
+export async function uninstallHubSkill(el, d) {
+  if (!confirm(`确定卸载 "${d.slug}"？此操作只移除已安装的 Hub Skill。`)) return;
+  try {
+    await localApi(`skills/hub/${encodeURIComponent(d.slug)}/uninstall`, { method: 'POST', body: {} });
+    toast(`已卸载 ${d.slug}`, 'success');
+    await renderHubInstalled();
+    const q = document.getElementById('hubSearchInput')?.value?.trim();
+    if (q) await searchHubSkills();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ========== 模板 ==========

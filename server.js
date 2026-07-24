@@ -113,6 +113,7 @@ const SKILLS_NEW_BADGE_MS = 7 * 24 * 60 * 60 * 1000;
 const skillsLib = require('./lib/skills').make({
   SKILLS_ROOT, SKILLS_REPO_ROOT, SKILLS_GITHUB_REPO, SKILLS_NEW_BADGE_MS,
   CUSTOM_SKILLS_ROOT: path.join(DATA_ROOT, 'skills', 'custom'),
+  HUB_INSTALLED_ROOT: path.join(DATA_ROOT, 'skills', 'hub'),
   rootDir: __dirname,
   HOT_SOURCE_CONFIG: () => HOT_SOURCE_CONFIG,
   cronTimers: () => cronTimers,
@@ -127,7 +128,7 @@ const {
   localSkillManifest, remoteSkillManifest, compareSkillManifests,
   communitySkillUpdateStatus, updateCommunitySkills,
   listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
-  listHubSkills, installHubSkill, listSkillTemplates, generateSkillFromTemplate,
+  listHubSkills, installHubSkill, uninstallHubSkill, listHubInstalled, listSkillTemplates, generateSkillFromTemplate,
 } = skillsLib;
 const agentLib = require('./lib/agent').make({
   rootDir: __dirname,
@@ -767,7 +768,7 @@ async function handleLocalApi(req, res, url) {
     listSkills, getSkill, getSkillSourceBinding, bindSkillToSource,
     classifyAllSkills, communitySkillUpdateStatus, updateCommunitySkills,
     listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
-    listHubSkills, installHubSkill,
+    listHubSkills, installHubSkill, uninstallHubSkill, listHubInstalled,
     listSkillTemplates, generateSkillFromTemplate,
   })) {
     return true;
