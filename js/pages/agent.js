@@ -218,6 +218,8 @@ export async function installHubSkill(el, d) {
   try {
     const result = await localApi(`skills/hub/${encodeURIComponent(d.slug)}/install`, { method: 'POST', body: {} });
     toast(`已安装 ${result.slug}，可在「我的 Skill」查看`, 'success');
+    // 切到「我的 Skill」tab，让用户立即看到刚装的
+    document.querySelector('.skill-tab[data-skill-tab="custom"]')?.click();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
@@ -558,6 +560,7 @@ export function switchAgentThread(threadId) {
     }
   }
   renderAgentMessages();
+  updateResumeHint();
 }
 
 export function clearCurrentAgentThread() {
@@ -595,6 +598,38 @@ export async function copySessionId(threadId) {
   }
 }
 
+export function toggleResumeMode(threadId) {
+  const thread = agentThreads.find(t => t.id === threadId);
+  if (!thread) return;
+  if (!thread.lastSessionId?.sessionId) {
+    toast('该对话没有 session-id，无法接续', 'error');
+    return;
+  }
+  thread.resumeMode = !thread.resumeMode;
+  saveAgentThreads();
+  renderAgentThreads();
+  // 切到该 thread，让用户立即可以发消息
+  if (currentAgentThreadId !== threadId) switchAgentThread(threadId);
+  // 在输入框上方提示
+  updateResumeHint();
+  toast(thread.resumeMode
+    ? `已开启接续：下条消息将带 ${thread.lastSessionId.sessionId.slice(0, 8)}…，发完自动关`
+    : '已关闭接续', 'info');
+}
+
+function updateResumeHint() {
+  const hint = document.getElementById('agent-resume-hint');
+  const thread = agentThreads.find(t => t.id === currentAgentThreadId);
+  if (!hint) return;
+  if (thread?.resumeMode && thread.lastSessionId?.sessionId) {
+    hint.classList.remove('hidden');
+    hint.innerHTML = `<i data-lucide="link-intact" class="w-3 h-3 inline"></i> 接续模式：将带 session <code class="text-amber-300">${thread.lastSessionId.sessionId.slice(0, 8)}…</code>，${esc(thread.agentName)} 会记得之前对话`;
+    initIcons(hint);
+  } else {
+    hint.classList.add('hidden');
+  }
+}
+
 export function renderAgentThreads() {
   const host = document.getElementById('agent-thread-list');
   if (!host) return;
@@ -607,7 +642,10 @@ export function renderAgentThreads() {
   host.innerHTML = myThreads.map(thread => `
     <div class="group flex items-center gap-1 px-2.5 py-2 rounded-lg border cursor-pointer text-xs ${thread.id === currentAgentThreadId ? 'border-amber-500/25 bg-amber-500/10 text-white' : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-white/10 hover:bg-white/[0.04]'}" data-action="switchAgentThread" data-id="${thread.id}">
       <span class="flex-1 truncate">${esc(thread.name)}</span>
-      ${thread.lastSessionId ? `<button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="copySessionId" data-id="${thread.id}" data-stop-prop title="复制 session-id，可用 ${esc(thread.agentId)} --resume 接续">
+      ${thread.lastSessionId ? `<button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5 ${thread.resumeMode ? 'text-amber-300' : ''}" data-action="toggleResumeMode" data-id="${thread.id}" data-stop-prop title="${thread.resumeMode ? '已开启接续：发完下条会自动关' : '开启接续：下条消息会带上 session-id 让 ' + esc(thread.agentId) + ' 记得之前对话'}">
+        <i data-lucide="${thread.resumeMode ? 'link-intact' : 'link'}" class="w-3 h-3"></i>
+      </button>
+      <button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="copySessionId" data-id="${thread.id}" data-stop-prop title="复制 session-id，可用 ${esc(thread.agentId)} --resume 接续">
         <i data-lucide="clipboard-copy" class="w-3 h-3"></i>
       </button>` : ''}
       <button class="hidden group-hover:flex btn btn-ghost py-0 px-0.5" data-action="deleteAgentThread" data-id="${thread.id}" data-stop-prop title="删除">
@@ -893,12 +931,22 @@ export async function sendAgentMessage() {
   button.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i>执行中…';
   initIcons(button);
   toggleStreamingIndicator(true);
+  // 如果 thread 开了 resume 模式，把 sessionId 一起带给后端
+  const resumeSessionId = thread?.resumeMode && thread.lastSessionId?.sessionId
+    ? thread.lastSessionId.sessionId : undefined;
   try {
     const result = await localApi('agent/chat', {
       method: 'POST',
-      body: { message, mode, agent },
+      body: { message, mode, agent, sessionId: resumeSessionId },
     });
-    const assistantMsg = { role: 'assistant', content: result.answer, agentName: result.agentName, timestamp: Date.now() };
+    // resume 用过即关，避免下次默认接续
+    if (thread?.resumeMode) {
+      thread.resumeMode = false;
+      saveAgentThreads();
+      renderAgentThreads();
+      updateResumeHint();
+    }
+    const assistantMsg = { role: 'assistant', content: result.answer, agentName: result.agentName, timestamp: Date.now(), resumed: Boolean(resumeSessionId) };
     // 后端从 ~/.xxx/projects/ 扫出的 session-id（resume 用），存到 thread
     if (thread && result.sessionId) {
       thread.sessionIds = thread.sessionIds || [];
