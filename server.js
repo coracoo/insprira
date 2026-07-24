@@ -124,7 +124,7 @@ const skillsLib = require('./lib/skills').make({
 });
 const {
   parseSkillFile, skillUpdateState, getSkillSourceBinding, bindSkillToSource,
-  classifyAllSkills, listSkills, invalidateSkillCache, getSkill,
+  classifyAllSkills, listSkills, invalidateSkillCache, getSkill, listAllAgentSkills,
   localSkillManifest, remoteSkillManifest, compareSkillManifests,
   communitySkillUpdateStatus, updateCommunitySkills,
   listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
@@ -765,7 +765,7 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
   if (await require('./lib/routes/skills').tryRoute(req, res, url, {
-    listSkills, getSkill, getSkillSourceBinding, bindSkillToSource,
+    listSkills, getSkill, listAllAgentSkills, getSkillSourceBinding, bindSkillToSource,
     classifyAllSkills, communitySkillUpdateStatus, updateCommunitySkills,
     listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
     listHubSkills, installHubSkill, uninstallHubSkill, listHubInstalled,

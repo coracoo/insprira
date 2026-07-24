@@ -7,6 +7,7 @@ import { gotoPage } from '../navigation.js';
 import { clearHotPlatforms } from './hotlist.js';
 
 let skillCache = [];
+let agentSkillCache = [];  // 合并三目录（RedFox + custom + hub），Agent / 补全用
 let agentCache = [];
 let agentMessages = [];
 let agentThreads = [];
@@ -825,10 +826,13 @@ export function handleAgentInputKeydown(event) {
 export async function renderAgent() {
   try {
     const [skillsResult, agentsResult] = await Promise.allSettled([
-      loadSkills(),
+      localApi('skills/all').catch(() => []),
       localApi('agents'),
     ]);
     if (agentsResult.status === 'rejected') throw agentsResult.reason;
+    if (skillsResult.status === 'fulfilled') {
+      agentSkillCache = skillsResult.value || [];
+    }
     if (skillsResult.status === 'rejected') {
       toast(`Skill 列表加载失败，但仍可使用 Agent：${skillsResult.reason.message}`, 'info');
     }
@@ -947,11 +951,15 @@ export function showSkillCommands() {
     return;
   }
   const keyword = match[1].toLowerCase();
-  const matches = skillCache.filter(skill =>
-    !keyword || skill.slug.includes(keyword) || skill.title.toLowerCase().includes(keyword)
+  const matches = agentSkillCache.filter(skill =>
+    !keyword || skill.slug.includes(keyword) || (skill.title || '').toLowerCase().includes(keyword)
   ).slice(0, 12);
   host.innerHTML = matches.map(skill => `
-    <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-white/[0.06]" data-action="insertSkillCommand" data-slug="${skill.slug}">
+    <button class="w-full text-left rounded-lg px-3 py-2 hover:bg-white/[0.06] flex items-center gap-2" data-action="insertSkillCommand" data-slug="${skill.slug}">
+      <span class="pill ${skill.source === 'custom' ? 'pill-brand' : skill.source === 'hub' ? 'pill-cyan' : 'pill-gray'} !text-[9px] !py-0 !px-1">${skill.source || 'redfox'}</span>
+      <span class="flex-1 truncate">${esc(skill.slug)}</span>
+      ${skill.title ? `<span class="text-[10px] text-gray-500 truncate">${esc(skill.title)}</span>` : ''}
+    </button>
       <div class="text-xs text-purple-300">/${esc(skill.slug)}</div>
       <div class="text-[11px] text-gray-500 mt-0.5">${esc(skill.title)} · ${esc(skill.category)}</div>
     </button>`).join('') || '<div class="p-2 text-xs text-gray-500">没有匹配的 Skill</div>';
