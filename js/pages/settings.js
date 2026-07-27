@@ -41,16 +41,19 @@ export async function renderSettings() {
     if (xhsPill) {
       const configured = !!status.xhsMcpConfigured;
       const loginStatus = status.xhsMcpLoginStatus || 'unknown';
+      const autoDetected = !!status.xhsMcpAutoDetected;
       let label = '未配置';
       let tone = 'pill-gray';
       if (configured) {
         if (loginStatus === 'logged_in') { label = '已登录'; tone = 'pill-green'; }
         else if (loginStatus === 'logged_out') { label = '未登录'; tone = 'pill-hot'; }
-        else { label = '已配置'; tone = 'pill-amber'; }
+        else { label = autoDetected ? '已检测' : '已配置'; tone = 'pill-amber'; }
       }
       xhsPill.className = `pill ${tone}`;
       xhsPill.innerHTML = `<i data-lucide="${configured ? 'check' : 'minus'}" class="w-3 h-3"></i>${label}`;
-      if (xhsText) xhsText.textContent = configured ? `接入：${loginStatus}` : '未配置';
+      if (xhsText) xhsText.textContent = configured
+        ? (autoDetected ? 'Docker 内网自动发现 · ' : '手动配置 · ') + loginStatus
+        : '未配置';
     }
     // WeRss pill：先用 status 快速显示未配置/已配置，已配置则异步拉详细状态
     const wersssPill = document.getElementById('wersss-status-pill');

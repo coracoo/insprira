@@ -50,6 +50,7 @@ services:
       HOST: 0.0.0.0
       DATA_DIR: /data
       NODE_ENV: development
+      XHS_MCP_URL: http://xiaohongshu-mcp:18060  # ← xiaohongshu-mcp 容器内网地址（profile xhs-mcp 启用后可达）
       # ===== Agent 接入（默认注释）=====
       # HOME: /data/agent-home          # ← Agent: CLI 的 ~/.xxx 重定向到 data 卷，session 跟着迁移走
       # AGENT_ADAPTER: local            # ← Agent: 强制本地 spawn（默认 Docker 自动 sbx，需另装 sbx CLI）
@@ -76,3 +77,35 @@ services:
     ports:
       - "8080:8080"
     # network_mode: host   # ← Agent: claude 走宿主本地代理时打开（ports 自动失效）
+
+# ─────────────────────────────────────────────────────────────
+# 小红书 MCP 接入（按需打开，默认注释）
+# ─────────────────────────────────────────────────────────────
+#
+# 前提：启动灵感熔炉时加 profile
+#   docker compose --profile xhs-mcp up -d
+#
+# 首次启动后到设置页「外部服务接入 → 小红书 MCP」扫码登录。
+# data/xhs-mcp/ 下存 cookies + 图片，迁移数据卷即带走登录态。
+#
+# 国内用户拉阿里云镜像更快（取消下方 image 的 # 注释切换）。
+#
+# 配置到 Docker 内部网络后，XHS_MCP_URL=http://xiaohongshu-mcp:18060
+# 自动生效，无需在设置页手动填 base_url。
+
+  # 小红书 MCP（xpzouying/xiaohongshu-mcp）— 扫码登录 + HTTP API + MCP 协议
+  # xiaohongshu-mcp:
+  #   image: xpzouying/xiaohongshu-mcp
+  #   container_name: xiaohongshu-mcp
+  #   restart: unless-stopped
+  #   init: true
+  #   tty: true
+  #   profiles: [xhs-mcp]
+  #   volumes:
+  #     - ./data/xhs-mcp/data:/app/data     # cookies + 登录态持久化
+  #     - ./data/xhs-mcp/images:/app/images # 发布用的图片
+  #   environment:
+  #     - ROD_BROWSER_BIN=/usr/bin/google-chrome
+  #     - COOKIES_PATH=/app/data/cookies.json
+  #   ports:
+  #     - "18060:18060"
