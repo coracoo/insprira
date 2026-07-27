@@ -50,7 +50,7 @@ services:
       HOST: 0.0.0.0
       DATA_DIR: /data
       NODE_ENV: development
-      XHS_MCP_URL: http://xiaohongshu-mcp:18060  # ← xiaohongshu-mcp 容器内网地址（profile xhs-mcp 启用后可达）
+      XHS_MCP_URL: http://xiaohongshu-mcp:18060  # ← xiaohongshu-mcp 容器内网地址（profile xhs-mcp 启用后可达）。host 网络模式时改用 http://localhost:18060
       # ===== Agent 接入（默认注释）=====
       # HOME: /data/agent-home          # ← Agent: CLI 的 ~/.xxx 重定向到 data 卷，session 跟着迁移走
       # AGENT_ADAPTER: local            # ← Agent: 强制本地 spawn（默认 Docker 自动 sbx，需另装 sbx CLI）
@@ -101,7 +101,8 @@ services:
   #   init: true
   #   tty: true
   #   profiles: [xhs-mcp]
-  #   shm_size: 2gb                                # Chrome headless 需要共享内存
+  #   network_mode: host                           # 走宿主网络栈：DNS 解析 + 代理（如 GLM 中转），Linux 专属
+  #   # shm_size: 2gb                              # host 模式下 shm_size 失效，改在下方 volumes 加 /dev/shm
   #   volumes:
   #     - ./data/xhs-mcp/data:/app/data     # cookies + 登录态持久化
   #     - ./data/xhs-mcp/images:/app/images # 发布用的图片
