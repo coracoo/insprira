@@ -101,11 +101,14 @@ services:
   #   init: true
   #   tty: true
   #   profiles: [xhs-mcp]
+  #   shm_size: 2gb                                # Chrome headless 需要共享内存
   #   volumes:
   #     - ./data/xhs-mcp/data:/app/data     # cookies + 登录态持久化
   #     - ./data/xhs-mcp/images:/app/images # 发布用的图片
   #   environment:
-  #     - ROD_BROWSER_BIN=/usr/bin/google-chrome
+  #     - ROD_BROWSER_BIN=/opt/browser/chrome  # 容器内 Chrome 路径
   #     - COOKIES_PATH=/app/data/cookies.json
+  #     # 代理（如需翻墙访问小红书，取消注释）
+  #     # - XHS_PROXY=http://host.docker.internal:7890
   #   ports:
   #     - "18060:18060"
