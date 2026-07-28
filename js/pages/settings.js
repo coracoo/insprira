@@ -114,17 +114,39 @@ export async function openRedfoxApply() {
 
 export async function openXhsMcpConfig() {
   let cfg = { configured: false, enabled: false, baseUrl: '', mcpUrl: '', loginStatus: 'unknown' };
+  let cli = { installed: false, version: null, startCommand: '' };
   try { cfg = { ...cfg, ...(await localApi('xhs-mcp/config')) }; } catch {}
+  try { cli = { ...cli, ...(await localApi('xhs-mcp/cli-status')) }; } catch {}
   const modal = document.createElement('div');
   modal.className = 'modal-mask';
-  modal.innerHTML = `<div class="modal" style="max-width:560px">
+  modal.innerHTML = `<div class="modal" style="max-width:600px">
     <div class="flex items-center justify-between mb-4">
       <div>
         <h2 class="text-lg font-bold flex items-center gap-2"><i data-lucide="book-open" class="w-5 h-5 text-pink-400"></i>配置 小红书 MCP</h2>
-        <p class="text-[11px] text-gray-500 mt-1">接入 <code class="text-pink-300">xpzouying/xiaohongshu-mcp</code> 服务，配置后才能发布/搜索/Agent 调用。</p>
+        <p class="text-[11px] text-gray-500 mt-1">接入 <code class="text-pink-300">xpzouying/xiaohongshu-mcp</code>，支持 CLI 本地运行或 Docker 部署。</p>
       </div>
       <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
+
+    <!-- CLI 安装区域 -->
+    <div class="rounded-lg border border-white/10 bg-white/[0.02] p-4 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold flex items-center gap-1.5"><i data-lucide="terminal" class="w-3.5 h-3.5 text-amber-400"></i>CLI 模式（推荐）</h3>
+        <span class="pill ${cli.installed ? 'pill-green' : 'pill-gray'} !text-[10px] !py-0 !px-1.5" id="cli-status-pill">${cli.installed ? `已安装 ${cli.version || ''}` : '未安装'}</span>
+      </div>
+      ${cli.installed
+        ? `<div class="text-[11px] text-gray-400 space-y-2">
+            <div class="flex items-center gap-2"><span class="text-gray-500">二进制：</span><code class="text-purple-300 text-[10px]">${esc(cli.binPath)}</code></div>
+            <div class="flex items-center gap-2"><span class="text-gray-500">启动命令：</span><code class="text-amber-300 text-[10px]">${esc(cli.startCommand)}</code><button class="btn btn-ghost py-0.5 px-1.5 text-[10px]" data-action="copyText" data-text="${esc(cli.startCommand)}" title="复制"><i data-lucide="copy" class="w-3 h-3"></i></button></div>
+            <p class="text-gray-600">在宿主机终端执行上述命令，监听 :18060 端口后即可使用下方功能。</p>
+          </div>`
+        : `<div class="text-[11px] text-gray-400 space-y-2">
+            <p>CLI 模式下 <code class="text-purple-300">xiaohongshu-mcp</code> 直接在宿主机运行，复用宿主 Chrome 和网络栈，避免 Docker 内的浏览器兼容问题。</p>
+            <button class="btn btn-primary py-1.5 text-xs" data-action="installXhsMcpCli" id="install-cli-btn"><i data-lucide="download" class="w-3.5 h-3.5"></i>安装 CLI（~16 MB）</button>
+          </div>`}
+    </div>
+
+    <!-- HTTP 接入区域 -->
     <div class="space-y-3">
       <label class="block">
         <span class="text-xs text-gray-400">HTTP API Base URL <span class="text-red-400">*</span></span>
@@ -219,6 +241,27 @@ export async function xhsMcpResetLogin() {
     toast('已重置登录态', 'success');
     await renderSettings();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function installXhsMcpCli() {
+  const btn = document.getElementById('install-cli-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>下载中（~16 MB）…'; initIcons(btn); }
+  try {
+    const result = await localApi('xhs-mcp/install', { method: 'POST' });
+    toast(`已安装 ${result.version}（${(result.size / 1024 / 1024).toFixed(1)} MB）· 在宿主机终端执行启动命令即可`, 'success');
+    document.querySelector('.modal-mask')?.remove();
+    openXhsMcpConfig(); // 重新打开显示已安装状态
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="download" class="w-3.5 h-3.5"></i>安装 CLI（~16 MB）'; initIcons(btn); }
+  }
+}
+
+export async function copyText(el, d) {
+  try {
+    await navigator.clipboard.writeText(d.text || '');
+    toast('已复制', 'success');
+  } catch { toast('复制失败', 'error'); }
 }
 
 // ========== WeRss 配置（从 knowledgebase.js 迁入，知识库 tab 只展示） ==========
