@@ -697,7 +697,7 @@ function invalidateKbEntryCache(sourceType, entryKey) {
 
 // 豆包 WebSearch：提交搜索任务后轮询等待结果，最多等 60s
 async function doDoubaoWebSearch(query, source = 'insprira-rewrite') {
-  if (!API_KEY) throw new Error('未配置 REDFOX_API_KEY');
+  if (!process.env.REDFOX_API_KEY) throw new Error('未配置 REDFOX_API_KEY');
   const submitResp = await redfoxRequest('doubaoSearch/submit', { inquiry_text: query, source });
   const submitPayload = parseJson(submitResp.body);
   if (submitResp.status >= 400 || !submitPayload || ![200, 2000].includes(submitPayload.code)) {
@@ -1138,7 +1138,7 @@ const {
 if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`灵感熔炉已启动：http://${HOST}:${PORT}`);
-    console.log(`RedFox API：${API_KEY ? '已配置' : '未配置 REDFOX_API_KEY'}`);
+    console.log(`RedFox API：${process.env.REDFOX_API_KEY ? '已配置' : '未配置 REDFOX_API_KEY'}`);
     console.log(`LLM：${process.env.LLM_API_KEY ? `已配置 ${process.env.LLM_MODEL || ''}` : '未配置，选题生成功能不可用'}`);
     console.log('访问控制：已启用 SQLite 账号登录');
     loadAllCronJobs();
