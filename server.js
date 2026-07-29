@@ -54,7 +54,7 @@ const { notificationConfigs, publicNotificationConfigs, saveNotificationConfigs 
   (module, key, data, expiresAt) => setLocalData(module, key, data, expiresAt),
 );
 const { clamp, logAction, listActionLogs, usageSummary, getOfficialQuota: getOfficialQuotaRaw } = require('./lib/observability');
-const getOfficialQuota = () => getOfficialQuotaRaw(REDFOX_HOST, REDFOX_WEB_COOKIE);
+const getOfficialQuota = () => getOfficialQuotaRaw(process.env.REDFOX_HOST || 'redfox.hk', process.env.REDFOX_WEB_COOKIE || '');
 const llmLib = require('./lib/llm');
 const { parseLlmJson, WEB_SEARCH_TOOL } = llmLib;
 // doDoubaoWebSearch / formatDoubaoSearchResults 是 hoisted function declarations，
