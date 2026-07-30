@@ -46,6 +46,7 @@ const { MAX_BODY_SIZE, json, readBody } = require('./lib/http');
 const {
   getWersssConfigRow, getWersssConfig, getValidWersssToken,
   getWersssAuthStatus, syncWersssArticles, prefetchWersssContent,
+  runWersssSyncCron,
 } = require('./lib/wersss');
 const notifLib = require('./lib/notifications');
 const { NOTIFICATION_CHANNELS, sendNotification } = notifLib;
