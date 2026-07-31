@@ -161,6 +161,9 @@ function renderAccountCard(acc, idx) {
   const scoreHist = all.slice(0, 8).reverse().map(s => s.score).filter(v => v != null);
   const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
 
+  // 作品阅读量分析
+  const worksBlock = renderWorksAnalysis(diag?.works);
+
   // AI 分析（如果有）
   let analysisBlock = '';
   try {
@@ -178,7 +181,7 @@ function renderAccountCard(acc, idx) {
     }
   } catch {}
 
-  const hasDetail = Boolean(dimBars || benchmarkRows || strengths || weaknesses || competitors);
+  const hasDetail = Boolean(dimBars || benchmarkRows || strengths || weaknesses || competitors || worksBlock);
 
   return `
     <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition">
@@ -245,11 +248,88 @@ function renderAccountCard(acc, idx) {
           <div class="flex flex-wrap gap-1">${competitors}</div>
         </div>` : ''}
 
+        ${worksBlock}
+
         ${analysisBlock}
 
       </div>` : ''}
     </div>
   `;
+}
+
+function renderWorksAnalysis(works) {
+  if (!Array.isArray(works) || !works.length) return '';
+  // 解析作品数据
+  const parsed = works.map(w => ({
+    title: String(w['标题'] || w.title || '').replace(/\[.*?\]\((.*?)\)/, '').replace(/\[(.*?)\]/, '$1').slice(0, 30),
+    reads: Number(w['阅读数'] || w.reads || 0),
+    likes: Number(w['点赞数'] || w.likes || 0),
+    comments: Number(w['评论数'] || w.comments || 0),
+    watch: Number(w['在看数'] || w.watch || 0),
+    date: w['发布时间'] || w.date || '',
+  })).filter(w => w.reads > 0 || w.likes > 0);
+  if (!parsed.length) return '';
+
+  // 按时间排序（旧→新）
+  parsed.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const reads = parsed.map(w => w.reads);
+  const maxRead = Math.max(...reads);
+  const avgRead = Math.round(reads.reduce((a, b) => a + b, 0) / reads.length);
+  const totalLikes = parsed.reduce((s, w) => s + w.likes, 0);
+  const totalComments = parsed.reduce((s, w) => s + w.comments, 0);
+  const engagementRate = reads.reduce((s, r, i) => s + r, 0)
+    ? ((totalLikes + totalComments) / reads.reduce((s, r) => s + r, 0) * 100).toFixed(1)
+    : '0';
+
+  // 找爆款和冷门
+  const best = parsed.reduce((a, b) => a.reads > b.reads ? a : b);
+  const worst = parsed.reduce((a, b) => a.reads < b.reads ? a : b);
+
+  // 每篇 bar（横向 bar，宽度 = reads / maxRead）
+  const bars = parsed.map((w, i) => {
+    const pct = maxRead ? (w.reads / maxRead * 100).toFixed(0) : 0;
+    const isBest = w === best;
+    const isWorst = w === best ? false : w === worst;
+    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400/60' : 'bg-amber-400/60';
+    const dateStr = w.date ? new Date(w.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+    return `
+      <div class="flex items-center gap-2 group">
+        <span class="text-[10px] text-gray-600 w-8 flex-shrink-0 text-right">${dateStr}</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5">
+            <div class="flex-1 h-4 rounded bg-white/[0.04] overflow-hidden flex-shrink-0">
+              <div class="h-full rounded ${tone} flex items-center justify-end pr-1.5" style="width:${Math.max(pct, 8)}%">
+                <span class="text-[9px] text-black/70 font-medium">${fmt(w.reads)}</span>
+              </div>
+            </div>
+          </div>
+          <div class="text-[10px] text-gray-500 truncate mt-0.5" title="${esc(w.title)}">${esc(w.title)}</div>
+        </div>
+        <div class="flex-shrink-0 flex items-center gap-2 text-[10px] text-gray-600">
+          <span title="点赞">👍${fmt(w.likes)}</span>
+          <span title="评论">💬${fmt(w.comments)}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-[10px] uppercase tracking-wider text-gray-500">作品阅读量分析</div>
+        <div class="flex items-center gap-3 text-[10px] text-gray-500">
+          <span>均阅 <span class="text-gray-300 font-medium">${fmt(avgRead)}</span></span>
+          <span>互动率 <span class="text-gray-300 font-medium">${engagementRate}%</span></span>
+          <span>${parsed.length} 篇</span>
+        </div>
+      </div>
+      <div class="space-y-1.5">${bars}</div>
+      ${best !== worst ? `
+      <div class="flex items-center gap-4 mt-2 text-[10px]">
+        <span class="text-emerald-400/80">▲ 爆款 ${esc(best.title.slice(0,16))} ${fmt(best.reads)}</span>
+        <span class="text-red-400/60">▼ 冷门 ${esc(worst.title.slice(0,16))} ${fmt(worst.reads)}</span>
+      </div>` : ''}
+    </div>`;
 }
 
 function renderSparkline(values) {
