@@ -38,7 +38,15 @@ export async function renderDashboard() {
         snapshots = trendResp?.snapshots || trendResp || [];
         if (!Array.isArray(snapshots)) snapshots = [];
       } catch {}
-      return { ...acc, tracker, snapshots };
+      // 拉 WeRss 文章（公众号才有）
+      let wersssArticles = [];
+      if (acc.plat === 'gzh') {
+        try {
+          wersssArticles = await localApi(`wersss/articles?mpName=${encodeURIComponent(acc.name)}&limit=10`);
+          if (!Array.isArray(wersssArticles)) wersssArticles = [];
+        } catch {}
+      }
+      return { ...acc, tracker, snapshots, wersssArticles };
     }));
 
     listEl.innerHTML = enriched.map((acc, i) => renderAccountCard(acc, i)).join('');
@@ -163,7 +171,7 @@ function renderAccountCard(acc, idx) {
   const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
 
   // 作品阅读量分析
-  const worksBlock = renderWorksAnalysis(diag?.works);
+  const worksBlock = renderWorksAnalysis(diag?.works, acc.wersssArticles);
 
   // AI 分析（如果有）
   let analysisBlock = '';
@@ -217,14 +225,14 @@ function renderAccountCard(acc, idx) {
       </div>
 
       ${hasDetail ? `
-      <!-- 展开按钮 -->
+      <!-- 展开/折叠按钮 -->
       <button class="w-full mt-2 flex items-center justify-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 py-1" data-expand-toggle="${idx}">
         <span>诊断明细</span>
-        <i data-lucide="chevron-down" class="w-3 h-3 expand-icon transition-transform"></i>
+        <i data-lucide="chevron-down" class="w-3 h-3 expand-icon transition-transform" style="transform:rotate(180deg)"></i>
       </button>
 
-      <!-- 诊断明细（默认折叠） -->
-      <div class="hidden mt-2 pt-3 border-t border-white/5 space-y-4" data-expand-detail="${idx}">
+      <!-- 诊断明细（默认展开） -->
+      <div class="mt-2 pt-3 border-t border-white/5 space-y-4" data-expand-detail="${idx}">
 
         <!-- 维度评分 -->
         ${dimBars ? `<div>
@@ -259,77 +267,115 @@ function renderAccountCard(acc, idx) {
   `;
 }
 
-function renderWorksAnalysis(works) {
-  if (!Array.isArray(works) || !works.length) return '';
-  // 解析作品数据
-  const parsed = works.map(w => ({
-    title: String(w['标题'] || w.title || '').replace(/\[.*?\]\((.*?)\)/, '').replace(/\[(.*?)\]/, '$1').slice(0, 30),
-    reads: Number(w['阅读数'] || w.reads || 0),
-    likes: Number(w['点赞数'] || w.likes || 0),
-    comments: Number(w['评论数'] || w.comments || 0),
-    watch: Number(w['在看数'] || w.watch || 0),
-    date: w['发布时间'] || w.date || '',
-  })).filter(w => w.reads > 0 || w.likes > 0);
+function renderWorksAnalysis(works, wersssArticles) {
+  // 合并诊断作品 + WeRss 文章
+  const parsed = [];
+  if (Array.isArray(works)) {
+    for (const w of works) {
+      const title = String(w['标题'] || w.title || '').replace(/\[.*?\]\(.*?\)/g, '').replace(/^\[|\]$/g, '').trim();
+      parsed.push({
+        title: title.slice(0, 50),
+        reads: Number(w['阅读数'] || w.reads || 0),
+        likes: Number(w['点赞数'] || w.likes || 0),
+        comments: Number(w['评论数'] || w.comments || 0),
+        watch: Number(w['在看数'] || w.watch || 0),
+        date: w['发布时间'] || w.date || '',
+        source: '诊断',
+        url: String(w['标题'] || '').match(/\((https?:\/\/[^\)]+)\)/)?.[1] || '',
+      });
+    }
+  }
+  // WeRss 文章补充（只有标题和日期，没有阅读量，但能展示最近更新）
+  if (Array.isArray(wersssArticles)) {
+    const existingTitles = new Set(parsed.map(p => p.title.slice(0, 10)));
+    for (const a of wersssArticles) {
+      const title = String(a.title || '').trim();
+      if (!title || existingTitles.has(title.slice(0, 10))) continue;
+      parsed.push({
+        title: title.slice(0, 50),
+        reads: 0,
+        likes: 0,
+        comments: 0,
+        watch: 0,
+        date: a.publishTime ? new Date(Number(a.publishTime)).toISOString() : '',
+        source: 'WeRss',
+        url: a.url || '',
+      });
+    }
+  }
+
   if (!parsed.length) return '';
 
-  // 按时间排序（旧→新）
-  parsed.sort((a, b) => new Date(a.date) - new Date(b.date));
+  // 按时间排序（新→旧）
+  parsed.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const reads = parsed.map(w => w.reads);
-  const maxRead = Math.max(...reads);
-  const avgRead = Math.round(reads.reduce((a, b) => a + b, 0) / reads.length);
+  const withReads = parsed.filter(w => w.reads > 0);
+  const maxRead = withReads.length ? Math.max(...withReads.map(w => w.reads)) : 0;
+  const avgRead = withReads.length ? Math.round(withReads.reduce((s, w) => s + w.reads, 0) / withReads.length) : 0;
   const totalLikes = parsed.reduce((s, w) => s + w.likes, 0);
   const totalComments = parsed.reduce((s, w) => s + w.comments, 0);
-  const engagementRate = reads.reduce((s, r, i) => s + r, 0)
-    ? ((totalLikes + totalComments) / reads.reduce((s, r) => s + r, 0) * 100).toFixed(1)
-    : '0';
+  const totalReads = parsed.reduce((s, w) => s + w.reads, 0);
+  const engagementRate = totalReads ? ((totalLikes + totalComments) / totalReads * 100).toFixed(1) : '—';
 
-  // 找爆款和冷门
-  const best = parsed.reduce((a, b) => a.reads > b.reads ? a : b);
-  const worst = parsed.reduce((a, b) => a.reads < b.reads ? a : b);
+  // 找爆款和冷门（仅诊断数据有阅读量）
+  let best = null, worst = null;
+  if (withReads.length >= 2) {
+    best = withReads.reduce((a, b) => a.reads > b.reads ? a : b);
+    worst = withReads.reduce((a, b) => a.reads < b.reads ? a : b);
+  }
 
-  // 每篇 bar（横向 bar，宽度 = reads / maxRead）
-  const bars = parsed.map((w, i) => {
-    const pct = maxRead ? (w.reads / maxRead * 100).toFixed(0) : 0;
-    const isBest = w === best;
-    const isWorst = w === best ? false : w === worst;
-    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400/60' : 'bg-amber-400/60';
+  const rows = parsed.slice(0, 10).map(w => {
     const dateStr = w.date ? new Date(w.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+    const hasData = w.reads > 0;
+    const pct = hasData && maxRead ? (w.reads / maxRead * 100).toFixed(0) : 0;
+    const isBest = best && w.title === best.title;
+    const isWorst = worst && w.title === worst.title && best !== worst;
+    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400/50' : 'bg-amber-400/50';
+    const sourceTag = w.source === 'WeRss'
+      ? '<span class="text-[9px] text-cyan-500 ml-1">RSS</span>'
+      : '';
+    const linkOpen = w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener" class="hover:text-amber-300 block">` : '<div>';
+    const linkClose = w.url ? '</a>' : '</div>';
+
     return `
-      <div class="flex items-center gap-2 group">
-        <span class="text-[10px] text-gray-600 w-8 flex-shrink-0 text-right">${dateStr}</span>
+      <div class="flex items-start gap-2 py-1.5 border-b border-white/[0.03] last:border-0">
+        <span class="text-[10px] text-gray-600 w-8 flex-shrink-0 text-right pt-0.5">${dateStr}</span>
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1.5">
-            <div class="flex-1 h-4 rounded bg-white/[0.04] overflow-hidden flex-shrink-0">
-              <div class="h-full rounded ${tone} flex items-center justify-end pr-1.5" style="width:${Math.max(pct, 8)}%">
-                <span class="text-[9px] text-black/70 font-medium">${fmt(w.reads)}</span>
-              </div>
+          ${linkOpen}
+          <div class="text-[11px] text-gray-300 truncate">${esc(w.title)}${sourceTag}</div>
+          ${linkClose}
+          ${hasData ? `
+          <div class="flex items-center gap-2 mt-0.5">
+            <div class="flex-1 h-2 rounded bg-white/[0.04] overflow-hidden">
+              <div class="h-full rounded ${tone}" style="width:${Math.max(pct, 5)}%"></div>
             </div>
-          </div>
-          <div class="text-[10px] text-gray-500 truncate mt-0.5" title="${esc(w.title)}">${esc(w.title)}</div>
+          </div>` : ''}
         </div>
-        <div class="flex-shrink-0 flex items-center gap-2 text-[10px] text-gray-600">
-          <span title="点赞">👍${fmt(w.likes)}</span>
-          <span title="评论">💬${fmt(w.comments)}</span>
-        </div>
+        ${hasData ? `
+        <div class="flex-shrink-0 flex items-center gap-2 text-[10px] pt-0.5">
+          <span class="text-gray-300 font-medium" title="阅读">${fmt(w.reads)}</span>
+          <span class="text-gray-600" title="点赞">👍${fmt(w.likes)}</span>
+          <span class="text-gray-600" title="评论">💬${fmt(w.comments)}</span>
+          ${w.watch ? `<span class="text-gray-600" title="在看">👀${fmt(w.watch)}</span>` : ''}
+        </div>` : `<span class="text-[10px] text-gray-700 flex-shrink-0 pt-0.5">无数据</span>`}
       </div>`;
   }).join('');
 
   return `
     <div>
       <div class="flex items-center justify-between mb-2">
-        <div class="text-[10px] uppercase tracking-wider text-gray-500">作品阅读量分析</div>
+        <div class="text-[10px] uppercase tracking-wider text-gray-500">近期作品</div>
         <div class="flex items-center gap-3 text-[10px] text-gray-500">
-          <span>均阅 <span class="text-gray-300 font-medium">${fmt(avgRead)}</span></span>
+          ${avgRead ? `<span>均阅 <span class="text-gray-300 font-medium">${fmt(avgRead)}</span></span>` : ''}
           <span>互动率 <span class="text-gray-300 font-medium">${engagementRate}%</span></span>
           <span>${parsed.length} 篇</span>
         </div>
       </div>
-      <div class="space-y-1.5">${bars}</div>
-      ${best !== worst ? `
+      <div>${rows}</div>
+      ${best && worst ? `
       <div class="flex items-center gap-4 mt-2 text-[10px]">
-        <span class="text-emerald-400/80">▲ 爆款 ${esc(best.title.slice(0,16))} ${fmt(best.reads)}</span>
-        <span class="text-red-400/60">▼ 冷门 ${esc(worst.title.slice(0,16))} ${fmt(worst.reads)}</span>
+        <span class="text-emerald-400/80">▲ 爆款 ${esc(best.title.slice(0,16))}… ${fmt(best.reads)}</span>
+        <span class="text-red-400/50">▼ 冷门 ${esc(worst.title.slice(0,16))}… ${fmt(worst.reads)}</span>
       </div>` : ''}
     </div>`;
 }
