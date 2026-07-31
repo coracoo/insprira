@@ -55,7 +55,11 @@ const { notificationConfigs, publicNotificationConfigs, saveNotificationConfigs 
   (module, key, data, expiresAt) => setLocalData(module, key, data, expiresAt),
 );
 const { clamp, logAction, listActionLogs, usageSummary, getOfficialQuota: getOfficialQuotaRaw } = require('./lib/observability');
-const getOfficialQuota = () => getOfficialQuotaRaw(process.env.REDFOX_HOST || 'redfox.hk', process.env.REDFOX_WEB_COOKIE || '');
+// 直接读 .env 文件（不走 process.env），确保用户改了 .env 后立即生效
+const getOfficialQuota = () => {
+  const env = readEnvValues(ENV_FILE);
+  return getOfficialQuotaRaw(env.REDFOX_HOST || 'redfox.hk', env.REDFOX_WEB_COOKIE || '');
+};
 const llmLib = require('./lib/llm');
 const { parseLlmJson, WEB_SEARCH_TOOL } = llmLib;
 // doDoubaoWebSearch / formatDoubaoSearchResults 是 hoisted function declarations，
@@ -88,6 +92,30 @@ const execFileAsync = promisify(execFile);
 
 const ENV_FILE = path.join(__dirname, '.env');
 loadEnvFile(ENV_FILE);
+
+// 监听 .env 文件变化：用户直接编辑 .env 后自动同步 process.env，无需重启
+// fs.watch 在 Docker bind mount 下也能正常工作（inotify）
+if (fs.existsSync(ENV_FILE)) {
+  let _envReloadTimer = null;
+  fs.watch(ENV_FILE, () => {
+    // 防抖：编辑器保存时可能触发多次
+    clearTimeout(_envReloadTimer);
+    _envReloadTimer = setTimeout(() => {
+      try {
+        const values = readEnvValues(ENV_FILE);
+        let changed = 0;
+        for (const [key, value] of Object.entries(values)) {
+          if (process.env[key] !== value) {
+            process.env[key] = value;
+            changed++;
+          }
+        }
+        if (changed) console.log(`[env] .env 变更已热加载（${changed} 个变量）`);
+      } catch (e) { /* 文件写入中途读取失败，跳过 */ }
+    }, 300);
+  });
+  console.log('[env] .env 文件监听已启用，编辑后自动生效');
+}
 
 // 时区：必须放在最早期，影响所有 new Date()、cron 调度与 data_date 边界
 // 必须在任何 Date 方法（getHours/getDate 等）被调用前执行
