@@ -34,7 +34,8 @@ export async function renderDashboard() {
       const tracker = trackers.find(t => t.id === trackerId);
       let snapshots = [];
       try {
-        snapshots = await localApi(`trackers/${encodeURIComponent(trackerId)}/snapshots`);
+        const trendResp = await localApi(`trackers/${encodeURIComponent(trackerId)}/trend?limit=10`);
+        snapshots = trendResp?.snapshots || trendResp || [];
         if (!Array.isArray(snapshots)) snapshots = [];
       } catch {}
       return { ...acc, tracker, snapshots };
@@ -80,7 +81,7 @@ function renderAccountCard(acc, idx) {
 
   // 解析诊断明细
   let diag = null;
-  try { diag = latest?.raw_data ? JSON.parse(latest.raw_data) : null; } catch {}
+  try { diag = latest?.report || (latest?.raw_data ? JSON.parse(latest.raw_data) : null); } catch {}
 
   const avatar = proxyImage(acc.avatar);
   const initial = (acc.name || '?')[0];
@@ -167,7 +168,8 @@ function renderAccountCard(acc, idx) {
   // AI 分析（如果有）
   let analysisBlock = '';
   try {
-    const analysis = latest?.analysis ? JSON.parse(latest.analysis) : null;
+    const analysis = latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis
+      : latest?.analysis ? JSON.parse(latest.analysis) : null;
     if (analysis && analysis.summary && !analysis.summary.includes('失败') && !analysis.summary.includes('降级')) {
       const actions = (analysis.actions || []).slice(0, 3).map(a => `<li class="text-[11px] text-gray-400">${esc(a)}</li>`).join('');
       const risks = (analysis.risks || []).slice(0, 2).map(r => `<li class="text-[11px] text-amber-300/80">${esc(r)}</li>`).join('');
