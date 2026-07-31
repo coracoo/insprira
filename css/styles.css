@@ -287,6 +287,18 @@
   .skill-tab{position:relative;font-weight:500;border-bottom:2px solid transparent;}
   .skill-tab.active{color:#fde68a;border-bottom-color:#fbbf24;}
   .skill-tab:hover:not(.active){color:var(--fg-1);}
+  /* 运营总览 pipeline stepper */
+  .ops-pipeline{display:flex;align-items:flex-start;padding:0 .5rem;}
+  .ops-stage{display:flex;flex-direction:column;align-items:center;gap:.25rem;flex-shrink:0;width:2.5rem;}
+  .ops-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line-2);background:transparent;transition:all .2s ease;}
+  .ops-dot-done{background:#fbbf24;border-color:#fbbf24;}
+  .ops-dot-active{background:#fbbf24;border-color:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.18);animation:ops-pulse 2.5s ease-in-out infinite;}
+  .ops-label{font-size:10px;color:var(--fg-4);white-space:nowrap;letter-spacing:.02em;}
+  .ops-label-active{color:#fbbf24;font-weight:600;}
+  .ops-line{height:2px;flex:1;min-width:1rem;background:var(--line-2);margin-top:4px;border-radius:1px;transition:background .2s ease;}
+  .ops-line-done{background:#fbbf24;}
+  @keyframes ops-pulse{0%,100%{box-shadow:0 0 0 3px rgba(251,191,36,.12);}50%{box-shadow:0 0 0 5px rgba(251,191,36,.22);}}
+  @media(prefers-reduced-motion:reduce){.ops-dot-active{animation:none;}}
   /* hotspot collapse — reserve space so result fields don't jump when panel toggles */
   .hotspot-collapse{max-height:0;overflow:hidden;opacity:0;transition:max-height .2s ease, opacity .15s ease, margin .2s ease;}
   .hotspot-collapse.is-open{max-height:320px;opacity:1;margin-bottom:.75rem;}

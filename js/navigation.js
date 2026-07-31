@@ -11,7 +11,6 @@ import { renderCreator } from './pages/creator.js';
 import { renderSkills } from './pages/agent.js';
 import { renderAgent } from './pages/agent.js';
 import { renderSettings } from './pages/settings.js';
-import { renderMyAccounts } from './pages/my.js';
 
 export const PAGES = {
   dashboard: { tpl: 'tpl-dashboard', init: renderDashboard },
@@ -25,7 +24,7 @@ export const PAGES = {
   creator:   { tpl: 'tpl-creator',   init: renderCreator },
   skills:    { tpl: 'tpl-skills',    init: renderSkills },
   agent:     { tpl: 'tpl-agent',     init: renderAgent },
-  my:        { tpl: 'tpl-my',        init: renderMyAccounts },
+  my:        { tpl: 'tpl-dashboard', init: renderDashboard },
   settings:  { tpl: 'tpl-settings',  init: renderSettings },
 };
 
