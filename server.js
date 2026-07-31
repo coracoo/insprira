@@ -103,8 +103,11 @@ if (fs.existsSync(ENV_FILE)) {
     _envReloadTimer = setTimeout(() => {
       try {
         const values = readEnvValues(ENV_FILE);
+        // Docker compose environment 段设的变量优先，不被 .env 覆盖
+        const dockerManaged = new Set(['HOST', 'DATA_DIR', 'NODE_ENV', 'PATH', 'HOME', 'TERM']);
         let changed = 0;
         for (const [key, value] of Object.entries(values)) {
+          if (dockerManaged.has(key)) continue;
           if (process.env[key] !== value) {
             process.env[key] = value;
             changed++;
