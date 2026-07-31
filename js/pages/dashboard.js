@@ -29,7 +29,6 @@ export async function renderDashboard() {
     listEl.classList.remove('hidden');
     emptyEl?.classList.add('hidden');
 
-    // 并发拉每个账号的快照历史
     const enriched = await Promise.all(accounts.map(async (acc) => {
       const trackerId = acc.trackerId || acc.id;
       const tracker = trackers.find(t => t.id === trackerId);
@@ -41,8 +40,22 @@ export async function renderDashboard() {
       return { ...acc, tracker, snapshots };
     }));
 
-    listEl.innerHTML = enriched.map(renderAccountCard).join('');
+    listEl.innerHTML = enriched.map((acc, i) => renderAccountCard(acc, i)).join('');
     initIcons(listEl);
+
+    // 绑定展开/折叠
+    listEl.querySelectorAll('[data-expand-toggle]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = btn.dataset.expandToggle;
+        const detail = listEl.querySelector(`[data-expand-detail="${idx}"]`);
+        if (detail) {
+          const isOpen = !detail.classList.contains('hidden');
+          detail.classList.toggle('hidden');
+          btn.querySelector('.expand-icon').style.transform = isOpen ? '' : 'rotate(180deg)';
+        }
+      });
+    });
 
     renderSummaryStats(enriched);
     renderQuickStats(trackers);
@@ -52,100 +65,195 @@ export async function renderDashboard() {
   }
 }
 
-function renderAccountCard(acc) {
+function getLatestSnapshot(acc) {
   const snaps = (acc.snapshots || []).sort((a, b) =>
     new Date(b.captured_at || b.snapshot_date) - new Date(a.captured_at || a.snapshot_date)
   );
-  const latest = snaps[0];
-  const prev = snaps[1];
+  return { latest: snaps[0], prev: snaps[1], all: snaps, count: snaps.length };
+}
+
+function renderAccountCard(acc, idx) {
+  const { latest, prev, all, count } = getLatestSnapshot(acc);
   const score = latest?.score;
   const prevScore = prev?.score;
   const trend = (score != null && prevScore != null) ? score - prevScore : null;
-  const scoreHist = snaps.slice(0, 6).reverse().map(s => s.score).filter(v => v != null);
+
+  // 解析诊断明细
+  let diag = null;
+  try { diag = latest?.raw_data ? JSON.parse(latest.raw_data) : null; } catch {}
 
   const avatar = proxyImage(acc.avatar);
   const initial = (acc.name || '?')[0];
   const platCls = acc.plat === 'dy' ? 'pill-hot' : acc.plat === 'xhs' ? 'pill-brand' : 'pill-green';
-  const trackerId = acc.trackerId || acc.id;
   const lastDate = latest?.snapshot_date || latest?.captured_at;
   const daysSince = lastDate ? Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000) : null;
 
-  // 状态判断
-  let alert = null;
+  // 状态 badge
+  let alertBadge = '';
   if (!latest) {
-    alert = { icon: 'circle-alert', text: '尚未诊断', tone: 'gray' };
+    alertBadge = '<span class="pill pill-gray !text-[10px]">未诊断</span>';
   } else if (daysSince > 7) {
-    alert = { icon: 'clock', text: `${daysSince} 天未更新`, tone: 'amber' };
+    alertBadge = `<span class="pill pill-amber !text-[10px]">${daysSince}天未更新</span>`;
   } else if (score != null && score < 60) {
-    alert = { icon: 'trending-down', text: `评分偏低（${score.toFixed(0)}）`, tone: 'red' };
-  } else if (trend != null && trend < -3) {
-    alert = { icon: 'trending-down', text: `较上次降 ${Math.abs(trend).toFixed(1)} 分`, tone: 'red' };
-  } else if (trend != null && trend > 3) {
-    alert = { icon: 'trending-up', text: `较上次升 ${trend.toFixed(1)} 分`, tone: 'green' };
+    alertBadge = `<span class="pill pill-hot !text-[10px]">需优化</span>`;
+  } else {
+    alertBadge = '<span class="pill pill-green !text-[10px]">健康</span>';
   }
 
-  const alertCls = {
-    gray: 'text-gray-400', amber: 'text-amber-300',
-    red: 'text-red-400', green: 'text-emerald-400',
-  }[alert?.tone || 'gray'];
-
-  // 分数展示
   const scoreDisplay = score != null ? score.toFixed(1) : '—';
+  const scoreColor = score != null && score < 60 ? 'text-red-300'
+    : score != null && score >= 80 ? 'text-emerald-300' : 'text-gray-200';
   const trendDisplay = trend != null
-    ? (trend > 0 ? `<span class="text-emerald-400 text-xs">+${trend.toFixed(1)}</span>`
-       : trend < 0 ? `<span class="text-red-400 text-xs">${trend.toFixed(1)}</span>`
-       : `<span class="text-gray-500 text-xs">持平</span>`)
+    ? (trend > 0 ? `<span class="text-emerald-400 text-xs">▲${trend.toFixed(1)}</span>`
+       : trend < 0 ? `<span class="text-red-400 text-xs">▼${Math.abs(trend).toFixed(1)}</span>`
+       : `<span class="text-gray-500 text-xs">—</span>`)
     : '';
 
-  // sparkline（mini 折线）
-  const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
+  // 维度评分条
+  const dimensions = diag?.dimensions || [];
+  const dimBars = dimensions.map(d => {
+    const pct = d.max ? (d.score / d.max * 100).toFixed(0) : 0;
+    const tone = pct >= 75 ? 'bg-emerald-400' : pct >= 60 ? 'bg-amber-400' : 'bg-red-400';
+    return `
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] text-gray-400 w-24 flex-shrink-0">${esc(d.name)}</span>
+        <div class="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+          <div class="h-full rounded-full ${tone}" style="width:${pct}%"></div>
+        </div>
+        <span class="text-[11px] font-mono w-12 text-right ${pct >= 75 ? 'text-emerald-300' : pct >= 60 ? 'text-amber-300' : 'text-red-300'}">${d.score}/${d.max}</span>
+      </div>`;
+  }).join('');
+
+  // 行业对标
+  const benchmark = diag?.scores?.['行业对标'];
+  const benchmarkRows = benchmark ? Object.entries(benchmark).slice(0, 4).map(([metric, data]) => {
+    if (!data || typeof data !== 'object') return '';
+    return `
+      <div class="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-0">
+        <span class="text-[11px] text-gray-400">${esc(metric)}</span>
+        <div class="flex items-center gap-3 text-[11px]">
+          <span class="text-gray-300 font-medium">${esc(data['本账号'] || '—')}</span>
+          <span class="text-gray-600">行业 ${esc(data['行业均值'] || '—')}</span>
+          <span class="text-gray-600">头部 ${esc(data['头部账号'] || '—')}</span>
+        </div>
+      </div>`;
+  }).join('') : '';
+
+  // 优势/待优化
+  const strengths = (diag?.scores?.['优势模块'] || []).map(s =>
+    `<span class="pill pill-green !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
+  ).join('');
+  const weaknesses = (diag?.scores?.['待优化模块'] || []).map(s =>
+    `<span class="pill pill-amber !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
+  ).join('');
+
+  // 相似竞品
+  const competitors = (diag?.similar_accounts || []).slice(0, 5).map(c =>
+    `<span class="pill pill-gray !text-[10px] !py-0.5">${esc(c['账号名称'] || c.name || '?')}</span>`
+  ).join('');
 
   // 赛道标签
   const trackBadges = (acc.tracks || []).slice(0, 3).map(t =>
     `<span class="pill pill-gray !text-[10px] !py-0 !px-1.5">${esc(t)}</span>`
   ).join('');
 
+  // sparkline
+  const scoreHist = all.slice(0, 8).reverse().map(s => s.score).filter(v => v != null);
+  const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
+
+  // AI 分析（如果有）
+  let analysisBlock = '';
+  try {
+    const analysis = latest?.analysis ? JSON.parse(latest.analysis) : null;
+    if (analysis && analysis.summary && !analysis.summary.includes('失败') && !analysis.summary.includes('降级')) {
+      const actions = (analysis.actions || []).slice(0, 3).map(a => `<li class="text-[11px] text-gray-400">${esc(a)}</li>`).join('');
+      const risks = (analysis.risks || []).slice(0, 2).map(r => `<li class="text-[11px] text-amber-300/80">${esc(r)}</li>`).join('');
+      if (actions || risks) {
+        analysisBlock = `
+          <div class="mt-3 p-3 bg-white/[0.02] rounded-lg space-y-1.5">
+            ${risks ? `<div><span class="text-[10px] uppercase text-amber-400/70 tracking-wider">风险</span><ul class="mt-1 space-y-0.5">${risks}</ul></div>` : ''}
+            ${actions ? `<div><span class="text-[10px] uppercase text-cyan-400/70 tracking-wider">建议</span><ul class="mt-1 space-y-0.5">${actions}</ul></div>` : ''}
+          </div>`;
+      }
+    }
+  } catch {}
+
+  const hasDetail = Boolean(dimBars || benchmarkRows || strengths || weaknesses || competitors);
+
   return `
-    <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition cursor-pointer" data-action="gotoPage" data-page="tracker">
-      <div class="flex items-start gap-3">
-        <!-- 头像 -->
+    <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition">
+      <!-- 摘要行（点击可跳转追踪页） -->
+      <div class="flex items-start gap-3 cursor-pointer" data-action="gotoPage" data-page="tracker">
         <div class="account-avatar flex-shrink-0" style="width:40px;height:40px;font-size:15px;">
           ${initial}${avatar ? `<img src="${avatar}" alt="" data-image-error="remove" />` : ''}
         </div>
-
-        <!-- 中间：名称 + 信息 -->
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1">
             <span class="font-semibold text-sm truncate">${esc(acc.name)}</span>
             <span class="pill ${platCls} !text-[10px] !py-0 flex-shrink-0">${esc(platName(acc.plat))}</span>
-            ${acc.styleProfile ? '<span class="pill pill-cyan !text-[10px] !py-0 flex-shrink-0" title="已提炼风格档案">风格</span>' : ''}
+            ${alertBadge}
+            ${acc.styleProfile ? '<span class="pill pill-cyan !text-[10px] !py-0 flex-shrink-0">风格</span>' : ''}
           </div>
           ${trackBadges ? `<div class="flex flex-wrap gap-1 mb-1">${trackBadges}</div>` : ''}
-          ${alert ? `<div class="flex items-center gap-1 text-[11px] ${alertCls}">
-            <i data-lucide="${alert.icon}" class="w-3 h-3"></i>${esc(alert.text)}
-          </div>` : ''}
-          <div class="text-[10px] text-gray-600 mt-0.5">
-            ${snaps.length ? `${snaps.length} 次诊断` : '无诊断记录'}
-            ${lastDate ? ` · 最后 ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}
+          <div class="text-[10px] text-gray-600">
+            ${count ? `${count} 次诊断` : '无诊断'}${lastDate ? ` · ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}${diag?.header?.['平均阅读数'] ? ` · 均读 ${fmt(diag.header['平均阅读数'])}` : ''}
           </div>
         </div>
-
-        <!-- 右侧：分数 + 趋势 -->
-        <div class="flex-shrink-0 text-right">
-          <div class="flex items-baseline gap-1 justify-end">
-            <span class="text-2xl font-bold ${score != null && score < 60 ? 'text-red-300' : score != null && score >= 80 ? 'text-emerald-300' : 'text-gray-200'}">${scoreDisplay}</span>
-            <span class="text-[10px] text-gray-600">分</span>
-          </div>
-          ${trendDisplay}
+        <div class="flex-shrink-0 text-right flex items-end gap-2">
           ${sparkline}
+          <div>
+            <div class="flex items-baseline gap-1 justify-end">
+              <span class="text-2xl font-bold ${scoreColor}">${scoreDisplay}</span>
+              <span class="text-[10px] text-gray-600">分</span>
+            </div>
+            <div class="text-right">${trendDisplay}</div>
+          </div>
         </div>
       </div>
+
+      ${hasDetail ? `
+      <!-- 展开按钮 -->
+      <button class="w-full mt-2 flex items-center justify-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 py-1" data-expand-toggle="${idx}">
+        <span>诊断明细</span>
+        <i data-lucide="chevron-down" class="w-3 h-3 expand-icon transition-transform"></i>
+      </button>
+
+      <!-- 诊断明细（默认折叠） -->
+      <div class="hidden mt-2 pt-3 border-t border-white/5 space-y-4" data-expand-detail="${idx}">
+
+        <!-- 维度评分 -->
+        ${dimBars ? `<div>
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">维度评分</div>
+          <div class="space-y-1.5">${dimBars}</div>
+        </div>` : ''}
+
+        <!-- 优势 / 待优化 -->
+        ${strengths || weaknesses ? `<div class="grid grid-cols-2 gap-3">
+          ${strengths ? `<div><div class="text-[10px] uppercase tracking-wider text-emerald-400/70 mb-1.5">优势</div><div class="flex flex-wrap gap-1">${strengths}</div></div>` : '<div></div>'}
+          ${weaknesses ? `<div><div class="text-[10px] uppercase tracking-wider text-amber-400/70 mb-1.5">待优化</div><div class="flex flex-wrap gap-1">${weaknesses}</div></div>` : ''}
+        </div>` : ''}
+
+        <!-- 行业对标 -->
+        ${benchmarkRows ? `<div>
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">行业对标</div>
+          ${benchmarkRows}
+        </div>` : ''}
+
+        <!-- 相似竞品 -->
+        ${competitors ? `<div>
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">相似竞品</div>
+          <div class="flex flex-wrap gap-1">${competitors}</div>
+        </div>` : ''}
+
+        ${analysisBlock}
+
+      </div>` : ''}
     </div>
   `;
 }
 
 function renderSparkline(values) {
-  const w = 56, h = 20, pad = 2;
+  const w = 48, h = 20, pad = 2;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -157,8 +265,8 @@ function renderSparkline(values) {
   });
   const isUp = values[values.length - 1] >= values[0];
   const color = isUp ? '#34d399' : '#f87171';
-  return `<svg width="${w}" height="${h}" class="mt-1 ml-auto block" viewBox="0 0 ${w} ${h}">
-    <polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" />
   </svg>`;
 }
 
@@ -168,36 +276,28 @@ function renderSummaryStats(accounts) {
     const snaps = acc.snapshots || [];
     totalDiag += snaps.length;
     if (snaps.length) {
-      const latest = snaps.sort((a, b) =>
-        new Date(b.captured_at || b.snapshot_date) - new Date(a.captured_at || a.snapshot_date)
-      )[0];
-      if (latest?.score != null) {
-        totalScore += latest.score;
+      const s = getLatestSnapshot(acc).latest;
+      if (s?.score != null) {
+        totalScore += s.score;
         scoreCount++;
-        if (latest.score < 65) needAttention++;
+        if (s.score < 65) needAttention++;
       }
     }
   }
-  const avgScore = scoreCount ? (totalScore / scoreCount).toFixed(0) : '—';
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  const labels = { 'ops-stat-analyze': '待诊断', 'ops-stat-issues': '需关注', 'ops-stat-topics': '平均分', 'ops-stat-creating': '总诊断', 'ops-stat-verify': '有风格' };
+  for (const [id, label] of Object.entries(labels)) {
+    const el = document.getElementById(id);
+    if (el) {
+      const labelEl = el.previousElementSibling;
+      if (labelEl) labelEl.textContent = label;
+    }
+  }
   set('ops-stat-analyze', accounts.length - scoreCount);
   set('ops-stat-issues', needAttention);
-  set('ops-stat-topics', avgScore);
+  set('ops-stat-topics', scoreCount ? (totalScore / scoreCount).toFixed(0) : '—');
   set('ops-stat-creating', totalDiag);
   set('ops-stat-verify', accounts.filter(a => a.styleProfile).length);
-
-  // 更新统计标签
-  const labels = {
-    'ops-stat-analyze': '待诊断',
-    'ops-stat-issues': '需关注',
-    'ops-stat-topics': '平均分',
-    'ops-stat-creating': '总诊断',
-    'ops-stat-verify': '有风格',
-  };
-  for (const [id, label] of Object.entries(labels)) {
-    const el = document.getElementById(id)?.previousElementSibling;
-    if (el) el.textContent = label;
-  }
 }
 
 async function renderQuickStats(trackers) {
