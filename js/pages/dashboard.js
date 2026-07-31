@@ -4,14 +4,6 @@ import { esc, fmt, proxyImage } from '../utils.js';
 import { platName } from '../config.js';
 import { initIcons } from '../icons.js';
 
-const STAGES = [
-  { key: 'analyze', label: '分析', icon: 'search', page: 'tracker' },
-  { key: 'topics', label: '选题', icon: 'lightbulb', page: 'inspiration' },
-  { key: 'create', label: '创作', icon: 'pen-tool', page: 'creator' },
-  { key: 'publish', label: '发布', icon: 'send', page: 'creator' },
-  { key: 'verify', label: '反馈', icon: 'trending-up', page: 'tracker' },
-];
-
 export async function renderDashboard() {
   const listEl = document.getElementById('ops-account-list');
   const emptyEl = document.getElementById('ops-account-empty');
@@ -30,30 +22,29 @@ export async function renderDashboard() {
       emptyEl?.classList.remove('hidden');
       initIcons(emptyEl || document.getElementById('content-area'));
       renderQuickStats(trackers);
+      renderSummaryStats([]);
       return;
     }
 
     listEl.classList.remove('hidden');
     emptyEl?.classList.add('hidden');
 
-    // 并发拉每个账号的最新诊断快照
-    const accountsWithSnapshot = await Promise.all(accounts.map(async (acc) => {
+    // 并发拉每个账号的快照历史
+    const enriched = await Promise.all(accounts.map(async (acc) => {
       const trackerId = acc.trackerId || acc.id;
       const tracker = trackers.find(t => t.id === trackerId);
-      let snapshot = null;
+      let snapshots = [];
       try {
-        const snaps = await localApi(`trackers/${encodeURIComponent(trackerId)}/snapshots`);
-        snapshot = Array.isArray(snaps) && snaps.length ? snaps[0] : null;
+        snapshots = await localApi(`trackers/${encodeURIComponent(trackerId)}/snapshots`);
+        if (!Array.isArray(snapshots)) snapshots = [];
       } catch {}
-      return { ...acc, tracker, snapshot };
+      return { ...acc, tracker, snapshots };
     }));
 
-    // 渲染账号流水线卡片
-    listEl.innerHTML = accountsWithSnapshot.map(renderAccountPipeline).join('');
+    listEl.innerHTML = enriched.map(renderAccountCard).join('');
     initIcons(listEl);
 
-    // 统计
-    renderPipelineStats(accountsWithSnapshot);
+    renderSummaryStats(enriched);
     renderQuickStats(trackers);
 
   } catch (e) {
@@ -61,122 +52,152 @@ export async function renderDashboard() {
   }
 }
 
-function determineStage(acc) {
-  const hasSnapshot = Boolean(acc.snapshot);
-  const score = acc.snapshot?.score;
-  const hasTracks = acc.tracks?.length > 0;
-  const hasStyle = Boolean(acc.styleProfile);
+function renderAccountCard(acc) {
+  const snaps = (acc.snapshots || []).sort((a, b) =>
+    new Date(b.captured_at || b.snapshot_date) - new Date(a.captured_at || a.snapshot_date)
+  );
+  const latest = snaps[0];
+  const prev = snaps[1];
+  const score = latest?.score;
+  const prevScore = prev?.score;
+  const trend = (score != null && prevScore != null) ? score - prevScore : null;
+  const scoreHist = snaps.slice(0, 6).reverse().map(s => s.score).filter(v => v != null);
 
-  if (!hasSnapshot) return 0;                    // 待分析
-  if (score != null && score < 65) return 1;     // 有问题
-  if (hasTracks || hasStyle) return 2;           // 有选题/风格
-  return 1;                                       // 默认：有问题待优化
-}
-
-function renderAccountPipeline(acc) {
-  const stage = determineStage(acc);
   const avatar = proxyImage(acc.avatar);
   const initial = (acc.name || '?')[0];
   const platCls = acc.plat === 'dy' ? 'pill-hot' : acc.plat === 'xhs' ? 'pill-brand' : 'pill-green';
-  const score = acc.snapshot?.score;
-  const snapshotDate = acc.snapshot?.snapshotDate || acc.snapshot?.captured_at;
-  const dateStr = snapshotDate
-    ? new Date(snapshotDate).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-    : null;
-  const daysSince = acc.snapshot?.captured_at
-    ? Math.floor((Date.now() - new Date(acc.snapshot.captured_at).getTime()) / 86400000)
-    : null;
-
-  // pipeline stepper
-  const pipeline = STAGES.map((s, i) => {
-    const done = i < stage;
-    const active = i === stage;
-    const dotCls = active ? 'ops-dot ops-dot-active'
-      : done ? 'ops-dot ops-dot-done'
-      : 'ops-dot';
-    const labelCls = active ? 'ops-label ops-label-active' : 'ops-label';
-    const lineCls = i < STAGES.length - 1
-      ? (i < stage ? 'ops-line ops-line-done' : 'ops-line')
-      : null;
-    return `
-      <div class="ops-stage">
-        <div class="${dotCls}"></div>
-        <div class="${labelCls}">${s.label}</div>
-      </div>
-      ${lineCls ? `<div class="${lineCls}"></div>` : ''}
-    `;
-  }).join('');
-
-  // 状态提示
-  let statusBadge = '';
-  let statusHint = '';
-  if (!acc.snapshot) {
-    statusBadge = '<span class="pill pill-gray !text-[10px]">未诊断</span>';
-    statusHint = '点击分析账号数据，发现优化方向';
-  } else if (score != null && score < 65) {
-    statusBadge = '<span class="pill pill-hot !text-[10px]">需优化</span>';
-    statusHint = `评分 ${score.toFixed(0)} · 有改进空间`;
-  } else {
-    statusBadge = '<span class="pill pill-green !text-[10px]">健康</span>';
-    statusHint = score ? `评分 ${score.toFixed(0)}` : '';
-  }
-  if (daysSince != null && daysSince > 7) {
-    statusHint += ` · ${daysSince}天前（建议更新）`;
-  }
-
-  const nextStage = STAGES[Math.min(stage, STAGES.length - 1)];
   const trackerId = acc.trackerId || acc.id;
+  const lastDate = latest?.snapshot_date || latest?.captured_at;
+  const daysSince = lastDate ? Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000) : null;
+
+  // 状态判断
+  let alert = null;
+  if (!latest) {
+    alert = { icon: 'circle-alert', text: '尚未诊断', tone: 'gray' };
+  } else if (daysSince > 7) {
+    alert = { icon: 'clock', text: `${daysSince} 天未更新`, tone: 'amber' };
+  } else if (score != null && score < 60) {
+    alert = { icon: 'trending-down', text: `评分偏低（${score.toFixed(0)}）`, tone: 'red' };
+  } else if (trend != null && trend < -3) {
+    alert = { icon: 'trending-down', text: `较上次降 ${Math.abs(trend).toFixed(1)} 分`, tone: 'red' };
+  } else if (trend != null && trend > 3) {
+    alert = { icon: 'trending-up', text: `较上次升 ${trend.toFixed(1)} 分`, tone: 'green' };
+  }
+
+  const alertCls = {
+    gray: 'text-gray-400', amber: 'text-amber-300',
+    red: 'text-red-400', green: 'text-emerald-400',
+  }[alert?.tone || 'gray'];
+
+  // 分数展示
+  const scoreDisplay = score != null ? score.toFixed(1) : '—';
+  const trendDisplay = trend != null
+    ? (trend > 0 ? `<span class="text-emerald-400 text-xs">+${trend.toFixed(1)}</span>`
+       : trend < 0 ? `<span class="text-red-400 text-xs">${trend.toFixed(1)}</span>`
+       : `<span class="text-gray-500 text-xs">持平</span>`)
+    : '';
+
+  // sparkline（mini 折线）
+  const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
+
+  // 赛道标签
+  const trackBadges = (acc.tracks || []).slice(0, 3).map(t =>
+    `<span class="pill pill-gray !text-[10px] !py-0 !px-1.5">${esc(t)}</span>`
+  ).join('');
 
   return `
-    <div class="ops-card glass-strong rounded-xl p-4">
-      <!-- 账号头 -->
-      <div class="flex items-center gap-3 mb-3">
-        <div class="account-avatar flex-shrink-0" style="width:36px;height:36px;font-size:14px;">
+    <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition cursor-pointer" data-action="gotoPage" data-page="tracker">
+      <div class="flex items-start gap-3">
+        <!-- 头像 -->
+        <div class="account-avatar flex-shrink-0" style="width:40px;height:40px;font-size:15px;">
           ${initial}${avatar ? `<img src="${avatar}" alt="" data-image-error="remove" />` : ''}
         </div>
+
+        <!-- 中间：名称 + 信息 -->
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 mb-1">
             <span class="font-semibold text-sm truncate">${esc(acc.name)}</span>
             <span class="pill ${platCls} !text-[10px] !py-0 flex-shrink-0">${esc(platName(acc.plat))}</span>
-            ${statusBadge}
+            ${acc.styleProfile ? '<span class="pill pill-cyan !text-[10px] !py-0 flex-shrink-0" title="已提炼风格档案">风格</span>' : ''}
           </div>
-          <div class="text-[11px] text-gray-500 mt-0.5">
-            ${acc.tracks?.length ? `${acc.tracks.length} 个赛道` : '未设赛道'}
-            ${acc.styleProfile ? ' · 已提炼风格' : ''}
-            ${dateStr ? ` · ${dateStr}诊断` : ''}
+          ${trackBadges ? `<div class="flex flex-wrap gap-1 mb-1">${trackBadges}</div>` : ''}
+          ${alert ? `<div class="flex items-center gap-1 text-[11px] ${alertCls}">
+            <i data-lucide="${alert.icon}" class="w-3 h-3"></i>${esc(alert.text)}
+          </div>` : ''}
+          <div class="text-[10px] text-gray-600 mt-0.5">
+            ${snaps.length ? `${snaps.length} 次诊断` : '无诊断记录'}
+            ${lastDate ? ` · 最后 ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}
           </div>
         </div>
-        <button class="btn btn-ghost py-1 px-2 text-[11px] flex-shrink-0" data-action="gotoPage" data-page="${nextStage.page}">
-          ${nextStage.label} <i data-lucide="arrow-right" class="w-3 h-3 inline"></i>
-        </button>
+
+        <!-- 右侧：分数 + 趋势 -->
+        <div class="flex-shrink-0 text-right">
+          <div class="flex items-baseline gap-1 justify-end">
+            <span class="text-2xl font-bold ${score != null && score < 60 ? 'text-red-300' : score != null && score >= 80 ? 'text-emerald-300' : 'text-gray-200'}">${scoreDisplay}</span>
+            <span class="text-[10px] text-gray-600">分</span>
+          </div>
+          ${trendDisplay}
+          ${sparkline}
+        </div>
       </div>
-
-      <!-- pipeline stepper -->
-      <div class="ops-pipeline mb-2">${pipeline}</div>
-
-      <!-- 状态提示 -->
-      ${statusHint ? `<div class="text-[11px] text-gray-500 flex items-center gap-1.5">
-        <i data-lucide="${score != null && score < 65 ? 'alert-circle' : 'info'}" class="w-3 h-3"></i>
-        ${esc(statusHint)}
-      </div>` : ''}
     </div>
   `;
 }
 
-function renderPipelineStats(accounts) {
-  const stats = { analyze: 0, issues: 0, topics: 0, creating: 0, verify: 0 };
+function renderSparkline(values) {
+  const w = 56, h = 20, pad = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (w - pad * 2) / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = pad + i * step;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const isUp = values[values.length - 1] >= values[0];
+  const color = isUp ? '#34d399' : '#f87171';
+  return `<svg width="${w}" height="${h}" class="mt-1 ml-auto block" viewBox="0 0 ${w} ${h}">
+    <polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+  </svg>`;
+}
+
+function renderSummaryStats(accounts) {
+  let totalScore = 0, scoreCount = 0, needAttention = 0, totalDiag = 0;
   for (const acc of accounts) {
-    const stage = determineStage(acc);
-    if (stage === 0) stats.analyze++;
-    else if (stage === 1) stats.issues++;
-    else if (stage === 2) stats.topics++;
+    const snaps = acc.snapshots || [];
+    totalDiag += snaps.length;
+    if (snaps.length) {
+      const latest = snaps.sort((a, b) =>
+        new Date(b.captured_at || b.snapshot_date) - new Date(a.captured_at || a.snapshot_date)
+      )[0];
+      if (latest?.score != null) {
+        totalScore += latest.score;
+        scoreCount++;
+        if (latest.score < 65) needAttention++;
+      }
+    }
   }
+  const avgScore = scoreCount ? (totalScore / scoreCount).toFixed(0) : '—';
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  set('ops-stat-analyze', stats.analyze);
-  set('ops-stat-issues', stats.issues);
-  set('ops-stat-topics', stats.topics);
-  set('ops-stat-creating', '—');
-  set('ops-stat-verify', '—');
+  set('ops-stat-analyze', accounts.length - scoreCount);
+  set('ops-stat-issues', needAttention);
+  set('ops-stat-topics', avgScore);
+  set('ops-stat-creating', totalDiag);
+  set('ops-stat-verify', accounts.filter(a => a.styleProfile).length);
+
+  // 更新统计标签
+  const labels = {
+    'ops-stat-analyze': '待诊断',
+    'ops-stat-issues': '需关注',
+    'ops-stat-topics': '平均分',
+    'ops-stat-creating': '总诊断',
+    'ops-stat-verify': '有风格',
+  };
+  for (const [id, label] of Object.entries(labels)) {
+    const el = document.getElementById(id)?.previousElementSibling;
+    if (el) el.textContent = label;
+  }
 }
 
 async function renderQuickStats(trackers) {
@@ -190,5 +211,4 @@ async function renderQuickStats(trackers) {
   set('ops-lib-count', `${lib.length} 条收藏`);
 }
 
-// 兼容旧调用（renderFeedAndHistory / renderDashboard 原有引用）
 export async function renderFeedAndHistory() {}
