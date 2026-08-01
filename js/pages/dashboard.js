@@ -272,7 +272,7 @@ function renderWorksAnalysis(works, wersssArticles) {
   const parsed = [];
   if (Array.isArray(works)) {
     for (const w of works) {
-      const title = String(w['标题'] || w.title || '').match(/^\[([^\]]+)\]\(/)?.[1] || String(w['标题'] || w.title || '').trim();
+      const title = String(w['标题'] || w.title || '').replace(/\[.*?\]\(.*?\)/g, '').replace(/^\[|\]$/g, '').trim();
       parsed.push({
         title: title.slice(0, 50),
         reads: Number(w['阅读数'] || w.reads || 0),
