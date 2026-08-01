@@ -321,26 +321,16 @@ function renderWorksSection(works, wersssArticles) {
     const linkEnd = w.url ? '</a>' : '</div>';
 
     return `
-      <div class="bg-white/[0.02] rounded-lg p-3">
-        <div class="flex items-start justify-between gap-2 mb-1.5">
-          <div class="flex-1 min-w-0">
-            ${link}<div class="text-[11px] text-gray-200 font-medium leading-snug">${esc(w.title)}${sourceTag ? ' ' + sourceTag : ''}</div>${linkEnd}
-            <div class="text-[9px] text-gray-600 mt-0.5">${dateStr}</div>
-          </div>
-          <span class="pill !text-[9px] !py-0 !px-1.5 flex-shrink-0 ${tier === 'hot' ? 'pill-green' : tier === 'cold' ? 'pill-hot' : tier === 'normal' ? 'pill-amber' : 'pill-gray'}">${tierLabel}</span>
-        </div>
+      <div class="bg-white/[0.02] rounded-lg p-2.5 border-l-2 ${tier === 'hot' ? 'border-emerald-400' : tier === 'cold' ? 'border-red-400' : tier === 'normal' ? 'border-amber-400' : 'border-gray-700'}">
+        ${link}<div class="text-[10px] text-gray-200 font-medium leading-tight line-clamp-2 mb-1">${esc(w.title)}</div>${linkEnd}
         ${hasData ? `
-        <div class="mb-2">
-          <div class="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-            <div class="h-full rounded-full ${barColor}" style="width:${barPct}%"></div>
-          </div>
+        <div class="h-1 rounded-full bg-white/[0.06] overflow-hidden mb-1.5">
+          <div class="h-full rounded-full ${barColor}" style="width:${barPct}%"></div>
         </div>
-        <div class="flex items-center gap-3 text-[10px]">
-          <span class="${tierColor} font-medium">📖 ${fmt(w.reads)}</span>
-          <span class="text-gray-500">👍 ${fmt(w.likes)}</span>
-          <span class="text-gray-500">💬 ${fmt(w.comments)}</span>
-          ${w.watch ? `<span class="text-gray-500">👀 ${fmt(w.watch)}</span>` : ''}
-        </div>` : '<div class="text-[10px] text-gray-700">暂无阅读数据</div>'}
+        <div class="flex items-center justify-between text-[9px]">
+          <span class="${tierColor} font-bold">📖 ${fmt(w.reads)}</span>
+          <span class="text-gray-500">👍${fmt(w.likes)} 💬${fmt(w.comments)}</span>
+        </div>` : '<div class="text-[9px] text-gray-700">无数据</div>'}
       </div>`;
   }).join('');
 
@@ -363,7 +353,7 @@ function renderWorksSection(works, wersssArticles) {
         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400"></span>冷门</span>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
         ${cardList}
       </div>
 
