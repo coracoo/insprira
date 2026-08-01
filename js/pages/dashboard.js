@@ -126,7 +126,7 @@ function renderAccountCard(acc, idx) {
     return `
       <div class="flex items-center gap-2">
         <span class="text-[11px] text-gray-400 w-24 flex-shrink-0">${esc(d.name)}</span>
-        <div class="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+        <div class="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden">
           <div class="h-full rounded-full ${tone}" style="width:${pct}%"></div>
         </div>
         <span class="text-[11px] font-mono w-12 text-right ${pct >= 75 ? 'text-emerald-300' : pct >= 60 ? 'text-amber-300' : 'text-red-300'}">${d.score}/${d.max}</span>
