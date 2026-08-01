@@ -297,6 +297,7 @@ function registerDefaultCrons() {
     { id: 'cache-clean', name: 'API缓存清理', cron_expr: '*/10 * * * *', enabled: 1, task_type: 'cache-clean' },
     { id: 'usage-clean', name: 'API 用量日志清理', cron_expr: '0 0 * * *', enabled: 1, task_type: 'usage-clean' },
     { id: 'wersss-sync', name: 'WeRss 公众号文章同步', cron_expr: '0 8 * * *', enabled: ENABLE_SCHEDULER ? 1 : 0, task_type: 'wersss-sync', task_config: null },
+    { id: 'my-account-diagnosis', name: '我的账号每日诊断', cron_expr: '0 9 * * *', enabled: ENABLE_SCHEDULER ? 1 : 0, task_type: 'my-account-diagnosis', task_config: null },
   ];
   const now = Date.now();
   // 系统固定任务允许配置演进（UPSERT），基础热榜 tab 任务只在首次安装时初始化一次，
@@ -970,6 +971,9 @@ function describeCronResult(taskType, result) {
   if (taskType === 'cache-clean' || taskType === 'usage-clean') {
     return result?.deleted != null ? `\n本次清理 ${result.deleted} 条记录。` : '';
   }
+  if (taskType === 'my-account-diagnosis') {
+    return `\n诊断 ${result.total || 0} 个账号，成功 ${result.done || 0} 个，失败 ${result.failed || 0} 个。`;
+  }
   return '';
 }
 
@@ -1014,6 +1018,9 @@ async function runCronTask(taskType, taskConfig = {}) {
   }
   if (taskType === 'wersss-sync') {
     return runWersssSyncCron();
+  }
+  if (taskType === 'my-account-diagnosis') {
+    return diagnoseMyAccounts();
   }
   throw new Error(`不支持的任务类型：${taskType}`);
 }
@@ -1139,7 +1146,7 @@ const trackerLib = require('./lib/tracker').make({
 const {
   listTrackers, saveTracker, syncTracker, listTrackerWorks,
   diagnoseAndStoreTracker, listAccountSnapshots,
-  refreshTrackedAccounts, restoreTrackerRetries,
+  refreshTrackedAccounts, diagnoseMyAccounts, restoreTrackerRetries,
   normalizeTrackerAccountId, trackerQuerySpec, trackerCollectionSpec,
   xhsTrackerAccounts, normalizeTrackerResult, trackerWorkId,
 } = trackerLib;

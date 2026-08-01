@@ -170,8 +170,9 @@ function renderAccountCard(acc, idx) {
   const scoreHist = all.slice(0, 8).reverse().map(s => s.score).filter(v => v != null);
   const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
 
-  // 作品阅读量分析
-  const worksBlock = renderWorksAnalysis(diag?.works, acc.wersssArticles);
+  // 作品阅读量分析（RedFox 有数据就不补 WeRss）
+  const hasRedfoxWorks = Array.isArray(diag?.works) && diag.works.length > 0;
+  const worksBlock = renderWorksAnalysis(diag?.works, hasRedfoxWorks ? null : acc.wersssArticles);
 
   // AI 分析（如果有）
   let analysisBlock = '';
