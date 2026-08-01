@@ -38,7 +38,6 @@ export async function renderDashboard() {
         snapshots = trendResp?.snapshots || trendResp || [];
         if (!Array.isArray(snapshots)) snapshots = [];
       } catch {}
-      // 拉 WeRss 文章（公众号才有）
       let wersssArticles = [];
       if (acc.plat === 'gzh') {
         try {
@@ -52,7 +51,6 @@ export async function renderDashboard() {
     listEl.innerHTML = enriched.map((acc, i) => renderAccountCard(acc, i)).join('');
     initIcons(listEl);
 
-    // 绑定展开/折叠
     listEl.querySelectorAll('[data-expand-toggle]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -87,7 +85,6 @@ function renderAccountCard(acc, idx) {
   const prevScore = prev?.score;
   const trend = (score != null && prevScore != null) ? score - prevScore : null;
 
-  // 解析诊断明细
   let diag = null;
   try { diag = latest?.report || (latest?.raw_data ? JSON.parse(latest.raw_data) : null); } catch {}
 
@@ -97,17 +94,11 @@ function renderAccountCard(acc, idx) {
   const lastDate = latest?.snapshot_date || latest?.captured_at;
   const daysSince = lastDate ? Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000) : null;
 
-  // 状态 badge
   let alertBadge = '';
-  if (!latest) {
-    alertBadge = '<span class="pill pill-gray !text-[10px]">未诊断</span>';
-  } else if (daysSince > 7) {
-    alertBadge = `<span class="pill pill-amber !text-[10px]">${daysSince}天未更新</span>`;
-  } else if (score != null && score < 60) {
-    alertBadge = `<span class="pill pill-hot !text-[10px]">需优化</span>`;
-  } else {
-    alertBadge = '<span class="pill pill-green !text-[10px]">健康</span>';
-  }
+  if (!latest) alertBadge = '<span class="pill pill-gray !text-[10px]">未诊断</span>';
+  else if (daysSince > 7) alertBadge = `<span class="pill pill-amber !text-[10px]">${daysSince}天未更新</span>`;
+  else if (score != null && score < 60) alertBadge = '<span class="pill pill-hot !text-[10px]">需优化</span>';
+  else alertBadge = '<span class="pill pill-green !text-[10px]">健康</span>';
 
   const scoreDisplay = score != null ? score.toFixed(1) : '—';
   const scoreColor = score != null && score < 60 ? 'text-red-300'
@@ -118,7 +109,6 @@ function renderAccountCard(acc, idx) {
        : `<span class="text-gray-500 text-xs">—</span>`)
     : '';
 
-  // 维度评分条
   const dimensions = diag?.dimensions || [];
   const dimBars = dimensions.map(d => {
     const pct = d.max ? (d.score / d.max * 100).toFixed(0) : 0;
@@ -133,7 +123,6 @@ function renderAccountCard(acc, idx) {
       </div>`;
   }).join('');
 
-  // 行业对标
   const benchmark = diag?.scores?.['行业对标'];
   const benchmarkRows = benchmark ? Object.entries(benchmark).slice(0, 4).map(([metric, data]) => {
     if (!data || typeof data !== 'object') return '';
@@ -148,7 +137,6 @@ function renderAccountCard(acc, idx) {
       </div>`;
   }).join('') : '';
 
-  // 优势/待优化
   const strengths = (diag?.scores?.['优势模块'] || []).map(s =>
     `<span class="pill pill-green !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
   ).join('');
@@ -156,25 +144,21 @@ function renderAccountCard(acc, idx) {
     `<span class="pill pill-amber !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
   ).join('');
 
-  // 相似竞品
   const competitors = (diag?.similar_accounts || []).slice(0, 5).map(c =>
     `<span class="pill pill-gray !text-[10px] !py-0.5">${esc(c['账号名称'] || c.name || '?')}</span>`
   ).join('');
 
-  // 赛道标签
   const trackBadges = (acc.tracks || []).slice(0, 3).map(t =>
     `<span class="pill pill-gray !text-[10px] !py-0 !px-1.5">${esc(t)}</span>`
   ).join('');
 
-  // sparkline
   const scoreHist = all.slice(0, 8).reverse().map(s => s.score).filter(v => v != null);
   const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
 
-  // 作品阅读量分析（RedFox 有数据就不补 WeRss）
+  // 阅读量趋势图 + 作品卡片
   const hasRedfoxWorks = Array.isArray(diag?.works) && diag.works.length > 0;
-  const worksBlock = renderWorksAnalysis(diag?.works, hasRedfoxWorks ? null : acc.wersssArticles);
+  const worksBlock = renderWorksSection(diag?.works, hasRedfoxWorks ? null : acc.wersssArticles);
 
-  // AI 分析（如果有）
   let analysisBlock = '';
   try {
     const analysis = latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis
@@ -196,7 +180,6 @@ function renderAccountCard(acc, idx) {
 
   return `
     <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition">
-      <!-- 摘要行（点击可跳转追踪页） -->
       <div class="flex items-start gap-3 cursor-pointer" data-action="gotoPage" data-page="tracker">
         <div class="account-avatar flex-shrink-0" style="width:40px;height:40px;font-size:15px;">
           ${initial}${avatar ? `<img src="${avatar}" alt="" data-image-error="remove" />` : ''}
@@ -210,7 +193,7 @@ function renderAccountCard(acc, idx) {
           </div>
           ${trackBadges ? `<div class="flex flex-wrap gap-1 mb-1">${trackBadges}</div>` : ''}
           <div class="text-[10px] text-gray-600">
-            ${count ? `${count} 次诊断` : '无诊断'}${lastDate ? ` · ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}${diag?.header?.['平均阅读数'] ? ` · 均读 ${fmt(diag.header['平均阅读数'])}` : ''}
+            ${count ? `${count} 次诊断` : '无诊断'}${lastDate ? ` · ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}${diag?.header?.['平均阅读数'] ? ` · 均阅 ${fmt(diag.header['平均阅读数'])}` : ''}
           </div>
         </div>
         <div class="flex-shrink-0 text-right flex items-end gap-2">
@@ -226,40 +209,34 @@ function renderAccountCard(acc, idx) {
       </div>
 
       ${hasDetail ? `
-      <!-- 展开/折叠按钮 -->
       <button class="w-full mt-2 flex items-center justify-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 py-1" data-expand-toggle="${idx}">
         <span>诊断明细</span>
         <i data-lucide="chevron-down" class="w-3 h-3 expand-icon transition-transform" style="transform:rotate(180deg)"></i>
       </button>
 
-      <!-- 诊断明细（默认展开） -->
       <div class="mt-2 pt-3 border-t border-white/5 space-y-4" data-expand-detail="${idx}">
 
-        <!-- 维度评分 -->
+        ${worksBlock}
+
         ${dimBars ? `<div>
           <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">维度评分</div>
           <div class="space-y-1.5">${dimBars}</div>
         </div>` : ''}
 
-        <!-- 优势 / 待优化 -->
         ${strengths || weaknesses ? `<div class="grid grid-cols-2 gap-3">
           ${strengths ? `<div><div class="text-[10px] uppercase tracking-wider text-emerald-400/70 mb-1.5">优势</div><div class="flex flex-wrap gap-1">${strengths}</div></div>` : '<div></div>'}
           ${weaknesses ? `<div><div class="text-[10px] uppercase tracking-wider text-amber-400/70 mb-1.5">待优化</div><div class="flex flex-wrap gap-1">${weaknesses}</div></div>` : ''}
         </div>` : ''}
 
-        <!-- 行业对标 -->
         ${benchmarkRows ? `<div>
           <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">行业对标</div>
           ${benchmarkRows}
         </div>` : ''}
 
-        <!-- 相似竞品 -->
         ${competitors ? `<div>
           <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">相似竞品</div>
           <div class="flex flex-wrap gap-1">${competitors}</div>
         </div>` : ''}
-
-        ${worksBlock}
 
         ${analysisBlock}
 
@@ -268,8 +245,10 @@ function renderAccountCard(acc, idx) {
   `;
 }
 
-function renderWorksAnalysis(works, wersssArticles) {
-  // 合并诊断作品 + WeRss 文章
+// ============ 作品阅读量：趋势图 + 卡片列表 ============
+
+function renderWorksSection(works, wersssArticles) {
+  // 合并诊断作品 + WeRss
   const parsed = [];
   if (Array.isArray(works)) {
     for (const w of works) {
@@ -282,103 +261,162 @@ function renderWorksAnalysis(works, wersssArticles) {
         comments: Number(w['评论数'] || w.comments || 0),
         watch: Number(w['在看数'] || w.watch || 0),
         date: w['发布时间'] || w.date || '',
+        url: rawTitle.match(/\((https?:\/\/[^\)]+)\)/)?.[1] || '',
         source: '诊断',
-        url: String(w['标题'] || '').match(/\((https?:\/\/[^\)]+)\)/)?.[1] || '',
       });
     }
   }
-  // WeRss 文章补充（只有标题和日期，没有阅读量，但能展示最近更新）
-  if (Array.isArray(wersssArticles)) {
-    const existingTitles = new Set(parsed.map(p => p.title.slice(0, 10)));
+  if (!parsed.length && Array.isArray(wersssArticles)) {
     for (const a of wersssArticles) {
-      const title = String(a.title || '').trim();
-      if (!title || existingTitles.has(title.slice(0, 10))) continue;
       parsed.push({
-        title: title.slice(0, 50),
-        reads: 0,
-        likes: 0,
-        comments: 0,
-        watch: 0,
+        title: String(a.title || '').trim().slice(0, 50),
+        reads: 0, likes: 0, comments: 0, watch: 0,
         date: a.publishTime ? new Date(Number(a.publishTime)).toISOString() : '',
-        source: 'WeRss',
-        url: a.url || '',
+        url: a.url || '', source: 'WeRss',
       });
     }
   }
-
   if (!parsed.length) return '';
 
-  // 按时间排序（新→旧）
-  parsed.sort((a, b) => new Date(b.date) - new Date(a.date));
+  // 按日期排序（旧→新，用于趋势图）
+  const sorted = [...parsed].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const withReads = sorted.filter(w => w.reads > 0);
 
-  const withReads = parsed.filter(w => w.reads > 0);
+  // 统计
   const maxRead = withReads.length ? Math.max(...withReads.map(w => w.reads)) : 0;
   const avgRead = withReads.length ? Math.round(withReads.reduce((s, w) => s + w.reads, 0) / withReads.length) : 0;
-  const totalLikes = parsed.reduce((s, w) => s + w.likes, 0);
-  const totalComments = parsed.reduce((s, w) => s + w.comments, 0);
-  const totalReads = parsed.reduce((s, w) => s + w.reads, 0);
+  const totalReads = sorted.reduce((s, w) => s + w.reads, 0);
+  const totalLikes = sorted.reduce((s, w) => s + w.likes, 0);
+  const totalComments = sorted.reduce((s, w) => s + w.comments, 0);
   const engagementRate = totalReads ? ((totalLikes + totalComments) / totalReads * 100).toFixed(1) : '—';
 
-  // 找爆款和冷门（仅诊断数据有阅读量）
+  // 分类：爆款/冷门/常规
   let best = null, worst = null;
   if (withReads.length >= 2) {
     best = withReads.reduce((a, b) => a.reads > b.reads ? a : b);
     worst = withReads.reduce((a, b) => a.reads < b.reads ? a : b);
   }
 
-  const rows = parsed.slice(0, 10).map(w => {
+  // 趋势图（面积折线）
+  const trendChart = withReads.length >= 2 ? renderReadsChart(withReads) : '';
+
+  // 作品卡片列表（新→旧）
+  const cardList = [...parsed].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10).map(w => {
     const dateStr = w.date ? new Date(w.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
     const hasData = w.reads > 0;
-    const pct = hasData && maxRead ? (w.reads / maxRead * 100).toFixed(0) : 0;
-    const isBest = best && w.title === best.title;
-    const isWorst = worst && w.title === worst.title && best !== worst;
-    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400' : 'bg-amber-400';
-    const sourceTag = w.source === 'WeRss'
-      ? '<span class="text-[9px] text-cyan-500 ml-1">RSS</span>'
-      : '';
-    const linkOpen = w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener" class="hover:text-amber-300 block">` : '<div>';
-    const linkClose = w.url ? '</a>' : '</div>';
+    // 分类
+    let tier, tierLabel, tierColor, barColor;
+    if (!hasData) {
+      tier = 'none'; tierLabel = '无数据'; tierColor = 'text-gray-600'; barColor = 'bg-gray-600';
+    } else if (best && w.title === best.title) {
+      tier = 'hot'; tierLabel = '爆款'; tierColor = 'text-emerald-300'; barColor = 'bg-emerald-400';
+    } else if (worst && w.title === worst.title && best !== worst) {
+      tier = 'cold'; tierLabel = '冷门'; tierColor = 'text-red-300'; barColor = 'bg-red-400';
+    } else {
+      tier = 'normal'; tierLabel = '常规'; tierColor = 'text-amber-300'; barColor = 'bg-amber-400';
+    }
+    const barPct = hasData && maxRead ? Math.max((w.reads / maxRead * 100), 8).toFixed(0) : 0;
+    const sourceTag = w.source === 'WeRss' ? '<span class="text-[9px] text-cyan-500">RSS</span>' : '';
+    const link = w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener" class="hover:text-amber-300">` : '<div>';
+    const linkEnd = w.url ? '</a>' : '</div>';
 
     return `
-      <div class="flex items-start gap-2 py-1.5 border-b border-white/[0.03] last:border-0">
-        <span class="text-[10px] text-gray-600 w-8 flex-shrink-0 text-right pt-0.5">${dateStr}</span>
-        <div class="flex-1 min-w-0">
-          ${linkOpen}
-          <div class="text-[11px] text-gray-300 truncate">${esc(w.title)}${sourceTag}</div>
-          ${linkClose}
-          ${hasData ? `
-          <div class="flex items-center gap-2 mt-0.5">
-            <div class="flex-1 h-2 rounded bg-white/[0.06] overflow-hidden">
-              <div class="h-full rounded ${tone}" style="width:${Math.max(pct, 8)}%"></div>
-            </div>
-          </div>` : ''}
+      <div class="bg-white/[0.02] rounded-lg p-3">
+        <div class="flex items-start justify-between gap-2 mb-1.5">
+          <div class="flex-1 min-w-0">
+            ${link}<div class="text-[11px] text-gray-200 font-medium leading-snug">${esc(w.title)}${sourceTag ? ' ' + sourceTag : ''}</div>${linkEnd}
+            <div class="text-[9px] text-gray-600 mt-0.5">${dateStr}</div>
+          </div>
+          <span class="pill !text-[9px] !py-0 !px-1.5 flex-shrink-0 ${tier === 'hot' ? 'pill-green' : tier === 'cold' ? 'pill-hot' : tier === 'normal' ? 'pill-amber' : 'pill-gray'}">${tierLabel}</span>
         </div>
         ${hasData ? `
-        <div class="flex-shrink-0 flex items-center gap-2 text-[10px] pt-0.5">
-          <span class="text-gray-300 font-medium" title="阅读">${fmt(w.reads)}</span>
-          <span class="text-gray-600" title="点赞">👍${fmt(w.likes)}</span>
-          <span class="text-gray-600" title="评论">💬${fmt(w.comments)}</span>
-          ${w.watch ? `<span class="text-gray-600" title="在看">👀${fmt(w.watch)}</span>` : ''}
-        </div>` : `<span class="text-[10px] text-gray-700 flex-shrink-0 pt-0.5">无数据</span>`}
+        <div class="mb-2">
+          <div class="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+            <div class="h-full rounded-full ${barColor}" style="width:${barPct}%"></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 text-[10px]">
+          <span class="${tierColor} font-medium">📖 ${fmt(w.reads)}</span>
+          <span class="text-gray-500">👍 ${fmt(w.likes)}</span>
+          <span class="text-gray-500">💬 ${fmt(w.comments)}</span>
+          ${w.watch ? `<span class="text-gray-500">👀 ${fmt(w.watch)}</span>` : ''}
+        </div>` : '<div class="text-[10px] text-gray-700">暂无阅读数据</div>'}
       </div>`;
   }).join('');
 
   return `
     <div>
-      <div class="flex items-center justify-between mb-2">
-        <div class="text-[10px] uppercase tracking-wider text-gray-500">近期作品</div>
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-[10px] uppercase tracking-wider text-gray-500">作品阅读量</div>
         <div class="flex items-center gap-3 text-[10px] text-gray-500">
           ${avgRead ? `<span>均阅 <span class="text-gray-300 font-medium">${fmt(avgRead)}</span></span>` : ''}
           <span>互动率 <span class="text-gray-300 font-medium">${engagementRate}%</span></span>
           <span>${parsed.length} 篇</span>
         </div>
       </div>
-      <div>${rows}</div>
+
+      ${trendChart}
+
+      <div class="flex items-center gap-3 mb-2 text-[10px]">
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>爆款</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span>常规</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400"></span>冷门</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        ${cardList}
+      </div>
+
       ${best && worst ? `
       <div class="flex items-center gap-4 mt-2 text-[10px]">
         <span class="text-emerald-400/80">▲ 爆款 ${esc(best.title.slice(0,16))}… ${fmt(best.reads)}</span>
-        <span class="text-red-400/50">▼ 冷门 ${esc(worst.title.slice(0,16))}… ${fmt(worst.reads)}</span>
+        <span class="text-red-400/60">▼ 冷门 ${esc(worst.title.slice(0,16))}… ${fmt(worst.reads)}</span>
       </div>` : ''}
+    </div>`;
+}
+
+function renderReadsChart(works) {
+  const w = 100; // percentage width
+  const h = 60;
+  const pad = { l: 4, r: 4, t: 6, b: 14 };
+  const reads = works.map(x => x.reads);
+  const max = Math.max(...reads);
+  const min = Math.min(...reads);
+  const range = max - min || max || 1;
+  const cw = w - pad.l - pad.r;
+  const ch = h - pad.t - pad.b;
+  const step = cw / (works.length - 1);
+
+  const points = works.map((x, i) => {
+    const px = pad.l + i * step;
+    const py = pad.t + ch - ((x.reads - min) / range) * ch;
+    return { x: px, y: py, read: x.reads, date: x.date };
+  });
+
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  const areaPath = linePath + ` L ${points[points.length - 1].x.toFixed(1)} ${pad.t + ch} L ${points[0].x.toFixed(1)} ${pad.t + ch} Z`;
+  const labels = points.map((p, i) => {
+    const d = p.date ? new Date(p.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
+    const readLabel = `<text x="${p.x.toFixed(1)}" y="${(p.y - 3).toFixed(1)}" fill="#94a3b8" font-size="5" text-anchor="middle">${fmt(p.read)}</text>`;
+    const dateLabel = `<text x="${p.x.toFixed(1)}" y="${(h - 3).toFixed(1)}" fill="#475569" font-size="4.5" text-anchor="middle">${d}</text>`;
+    return readLabel + dateLabel;
+  }).join('');
+  const dots = points.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.2" fill="#fbbf24" />`).join('');
+
+  return `
+    <div class="mb-3">
+      <svg viewBox="0 0 ${w} ${h}" class="w-full" style="height:80px" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="readsGrad${Math.random().toString(36).slice(2,6)}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.25" />
+            <stop offset="100%" stop-color="#fbbf24" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <path d="${areaPath}" fill="url(#readsGrad)" />
+        <path d="${linePath}" fill="none" stroke="#fbbf24" stroke-width="0.6" stroke-linejoin="round" stroke-linecap="round" />
+        ${dots}
+        ${labels}
+      </svg>
     </div>`;
 }
 
