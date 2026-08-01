@@ -272,7 +272,8 @@ function renderWorksAnalysis(works, wersssArticles) {
   const parsed = [];
   if (Array.isArray(works)) {
     for (const w of works) {
-      const title = String(w['标题'] || w.title || '').replace(/\[.*?\]\(.*?\)/g, '').replace(/^\[|\]$/g, '').trim();
+      const rawTitle = String(w['标题'] || w.title || '');
+      const title = (rawTitle.match(/^\[([^\]]+)\]\(/)?.[1] || rawTitle.replace(/\]\(https?:\/\/[^\)]*\)$/, '').replace(/^\[/, '')).trim();
       parsed.push({
         title: title.slice(0, 50),
         reads: Number(w['阅读数'] || w.reads || 0),
