@@ -332,7 +332,7 @@ function renderWorksAnalysis(works, wersssArticles) {
     const pct = hasData && maxRead ? (w.reads / maxRead * 100).toFixed(0) : 0;
     const isBest = best && w.title === best.title;
     const isWorst = worst && w.title === worst.title && best !== worst;
-    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400/50' : 'bg-amber-400/50';
+    const tone = isBest ? 'bg-emerald-400' : isWorst ? 'bg-red-400' : 'bg-amber-400';
     const sourceTag = w.source === 'WeRss'
       ? '<span class="text-[9px] text-cyan-500 ml-1">RSS</span>'
       : '';
@@ -348,8 +348,8 @@ function renderWorksAnalysis(works, wersssArticles) {
           ${linkClose}
           ${hasData ? `
           <div class="flex items-center gap-2 mt-0.5">
-            <div class="flex-1 h-2 rounded bg-white/[0.04] overflow-hidden">
-              <div class="h-full rounded ${tone}" style="width:${Math.max(pct, 5)}%"></div>
+            <div class="flex-1 h-2 rounded bg-white/[0.06] overflow-hidden">
+              <div class="h-full rounded ${tone}" style="width:${Math.max(pct, 8)}%"></div>
             </div>
           </div>` : ''}
         </div>
