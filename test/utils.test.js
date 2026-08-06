@@ -75,3 +75,54 @@ test('workContentKey 字段不同结果不同', () => {
   const b = workContentKey({ title: 'B', publishTime: 1 });
   assert.notEqual(a, b);
 });
+
+test('parseCountText 解析平台格式化计数', () => {
+  const { parseCountText } = require('../lib/utils');
+  assert.equal(parseCountText('1.7万'), 17000);
+  assert.equal(parseCountText('10万+'), 100000);
+  assert.equal(parseCountText('2亿'), 200000000);
+  assert.equal(parseCountText('345'), 345);
+  assert.equal(parseCountText(''), null);
+  assert.equal(parseCountText(null), null);
+  assert.equal(parseCountText('abc'), null);
+});
+
+test('mergeWorkData 指标取大只增不减', () => {
+  const { mergeWorkData } = require('../lib/utils');
+  const old = { title: 'T', readCount: 12686, likeCount: 147 };
+  const merged = mergeWorkData(old, { readCount: 3060, likeCount: 200, commentsCount: 50 });
+  assert.equal(merged.readCount, 12686); // RedFox 低值不冲刷插件实时值
+  assert.equal(merged.likeCount, 200);   // 新值更大则更新
+  assert.equal(merged.commentsCount, 50); // 新增指标补全
+});
+
+test('mergeWorkData 保留已有 url/publishTime，空值不覆盖', () => {
+  const { mergeWorkData } = require('../lib/utils');
+  const old = { title: 'T', url: 'https://mp.weixin.qq.com/s/abc', publishTime: '2026/8/3 20:40:50', readCount: 100 };
+  const merged = mergeWorkData(old, { title: 'T', url: '', publishTime: '2026-08-03', readCount: 90, shareCount: 10 });
+  assert.equal(merged.url, 'https://mp.weixin.qq.com/s/abc');
+  assert.equal(merged.publishTime, '2026/8/3 20:40:50'); // 保 content_key 稳定
+  assert.equal(merged.shareCount, 10);
+  // 旧行无 url 时新值生效
+  const m2 = mergeWorkData({ title: 'T' }, { url: 'https://x', publishTime: '2026-01-01' });
+  assert.equal(m2.url, 'https://x');
+  assert.equal(m2.publishTime, '2026-01-01');
+});
+
+test('mergeWorkData 新字段非空覆盖、旧字段不丢失', () => {
+  const { mergeWorkData } = require('../lib/utils');
+  const merged = mergeWorkData({ title: '旧', source: 'mp-extension', desc: 'keep' }, { title: '新' });
+  assert.equal(merged.title, '新');
+  assert.equal(merged.source, 'mp-extension'); // 新数据没有的字段保留
+  assert.equal(merged.desc, 'keep');
+});
+
+test('weekStartKey 周一为周起点', () => {
+  const { weekStartKey } = require('../lib/utils');
+  // 2026-08-05 是周三 → 周起点 2026-08-03（周一）
+  assert.equal(weekStartKey(new Date('2026-08-05T15:00:00').getTime()), '2026-08-03');
+  // 周日归本周周一，而不是下一周
+  assert.equal(weekStartKey(new Date('2026-08-09T10:00:00').getTime()), '2026-08-03');
+  // 周一当天即自身
+  assert.equal(weekStartKey(new Date('2026-08-03T00:30:00').getTime()), '2026-08-03');
+});

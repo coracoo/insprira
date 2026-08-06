@@ -24,7 +24,6 @@ export const PAGES = {
   creator:   { tpl: 'tpl-creator',   init: renderCreator },
   skills:    { tpl: 'tpl-skills',    init: renderSkills },
   agent:     { tpl: 'tpl-agent',     init: renderAgent },
-  my:        { tpl: 'tpl-dashboard', init: renderDashboard },
   settings:  { tpl: 'tpl-settings',  init: renderSettings },
 };
 

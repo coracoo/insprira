@@ -116,7 +116,8 @@ if (fs.existsSync(ENV_FILE)) {
         if (changed) console.log(`[env] .env 变更已热加载（${changed} 个变量）`);
       } catch (e) { /* 文件写入中途读取失败，跳过 */ }
     }, 300);
-  });
+  // unref：不让 watcher 阻止进程退出（测试进程 require server.js 后能正常结束）
+  }).unref();
   console.log('[env] .env 文件监听已启用，编辑后自动生效');
 }
 
@@ -857,7 +858,28 @@ async function handleLocalApi(req, res, url) {
     listMyAccounts, saveMyAccount, getMyAccount,
     extractAccountTracks, extractAccountStyleProfile, generatePresetInspirations,
     suggestInspirationConfigs, createInspirationConfigFromSuggestion,
+    listAccountSnapshots, analyzeAccountWorks, listArticleAnalyses,
+    syncMpOfficialStats: mpOfficial.syncMpOfficialStats,
   })) {
+    return true;
+  }
+
+  // ========== 运营总览 ==========
+  if (await require('./lib/routes/dashboard').tryRoute(req, res, url, {
+    buildOverview, getSummary: dashboardOverview.getSummary,
+    generateSummary: dashboardOverview.generateSummary,
+    setActionStatus: require('./lib/dashboard-overview').setActionStatus,
+  })) {
+    return true;
+  }
+
+  // ========== 公众号 IP 白名单自动配置 ==========
+  if (await require('./lib/routes/mp-whitelist').tryRoute(req, res, url, { mpWhitelist, mpOfficial })) {
+    return true;
+  }
+
+  // ========== 外部数据上报（浏览器插件，INGEST_TOKEN 鉴权） ==========
+  if (await require('./lib/routes/ingest').tryRoute(req, res, url, { ENV_FILE })) {
     return true;
   }
 
@@ -880,7 +902,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
   try {
-    const publicApi = url.pathname === '/api/_/login' || url.pathname === '/api/_/status' || url.pathname === '/api/_/version';
+    const publicApi = url.pathname === '/api/_/login' || url.pathname === '/api/_/status' || url.pathname === '/api/_/version'
+      || url.pathname === '/api/_/ingest/mp-stats'; // 插件上报：无会话 Cookie，路由内用 INGEST_TOKEN 鉴权
     if (url.pathname.startsWith('/api/') && !publicApi && !isAuthorized(req)) {
       json(res, 401, { ok: false, error: '请先登录' });
       return;
@@ -1150,6 +1173,21 @@ const {
   normalizeTrackerAccountId, trackerQuerySpec, trackerCollectionSpec,
   xhsTrackerAccounts, normalizeTrackerResult, trackerWorkId,
 } = trackerLib;
+
+// 微信公众平台官方数据统计（datacube）：认证号的权威 T+1 阅读数据
+const mpOfficial = require('./lib/wechat-official').make({ ENV_FILE });
+
+// 公众号 IP 白名单自动配置（40164 自救：puppeteer 驱动控制台 + 扫码核验）
+const mpWhitelist = require('./lib/mp-whitelist');
+
+// 文章级表现分析：RedFox 数据 + LLM 逐篇诊断；xhs/mpOfficial 为准实时/官方数据源
+const { analyzeAccountWorks, listArticleAnalyses } = require('./lib/article-analysis').make({
+  redfoxData, callLlmJson, xhsService: require('./lib/xhs-mcp/service'), mpOfficial,
+});
+
+// 运营总览：跨账号聚合 + LLM 运营总结
+const { buildOverview } = require('./lib/dashboard-overview');
+const dashboardOverview = require('./lib/dashboard-overview').make({ callLlmJson });
 
 // inspiration 模块工厂：在 saveCronJob/deleteCronJob 声明后构造
 const inspirationLib = require('./lib/inspiration').make({

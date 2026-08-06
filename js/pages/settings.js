@@ -408,6 +408,10 @@ export async function openEnvModal() {
       ['LLM_MODEL','LLM 模型','text'],
       ['KB_ENCRYPTION_KEY','知识库加密密钥','password','用于加密 Notion 凭证。已有数据请勿随意修改。'],
       ['GITHUB_API_TOKEN','GitHub API Token','password','可选。Skill 中心更新走 GitHub API，未配置时匿名请求频率 60/hr 容易 403；配置后提升到 5000/hr。Personal access token 即可，无需勾选任何权限。','https://github.com/settings/tokens'],
+      ['MP_APP_ID','公众号 AppID','text','微信公众平台 → 设置与开发 → 基本配置。用于官方 T+1 阅读数据同步与 IP 白名单自动配置。'],
+      ['MP_APP_SECRET','公众号 AppSecret','password','服务器出口 IP 需加进公众平台 IP 白名单（dashboard「官方数据」报 40164 时可一键自动配置）。'],
+      ['MP_ACCOUNT_NAME','公众号名称','text','可选。该 AppID 对应「我的账号」里的公众号名，多公众号时用于精确匹配。'],
+      ['CHROME_PATH','Chrome 路径','text','可选。IP 白名单自动配置用，缺省自动探测 /usr/bin/google-chrome 等常见路径。'],
       ['ENABLE_SCHEDULER','启用调度器','text',''],
     ];
     const modal = document.createElement('div');

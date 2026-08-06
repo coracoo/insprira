@@ -194,49 +194,80 @@
   <div class="page-header">
     <div>
       <div class="page-header-title"><i data-lucide="layout-dashboard" class="w-5 h-5 text-amber-400"></i>运营总览</div>
-      <div class="page-header-sub">分析 → 竞品选题 → 创作 → 发布 → 数据反馈 · 一眼看清闭环进度</div>
+      <div class="page-header-sub">整体健康 → 问题定位 → 行动建议 · 跨账号一眼看清</div>
     </div>
     <div class="page-header-actions">
       <button class="btn btn-primary py-1.5 text-xs" data-action="addMyAccount"><i data-lucide="plus" class="w-3.5 h-3.5"></i>添加账号</button>
     </div>
   </div>
 
-  <!-- 运营流水线统计 -->
-  <div class="grid grid-cols-5 gap-3">
+  <!-- KPI 条（数值由 renderKpis 填充） -->
+  <div class="grid grid-cols-3 lg:grid-cols-6 gap-3">
     <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="tracker">
-      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">待分析</div>
-      <div class="text-2xl font-bold text-gray-300" id="ops-stat-analyze">—</div>
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">账号</div>
+      <div class="text-2xl font-bold text-gray-200" id="ops-kpi-accounts">—</div>
     </div>
     <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="tracker">
-      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">有问题</div>
-      <div class="text-2xl font-bold text-amber-300" id="ops-stat-issues">—</div>
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">平均分</div>
+      <div class="text-2xl font-bold text-gray-200" id="ops-kpi-score">—</div>
     </div>
-    <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="inspiration">
-      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">有选题</div>
-      <div class="text-2xl font-bold text-cyan-300" id="ops-stat-topics">—</div>
+    <div class="glass rounded-xl p-3 text-center">
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">已分析文章</div>
+      <div class="text-2xl font-bold text-gray-200" id="ops-kpi-analyzed">—</div>
     </div>
-    <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="creator">
-      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">创作中</div>
-      <div class="text-2xl font-bold text-pink-300" id="ops-stat-creating">—</div>
+    <div class="glass rounded-xl p-3 text-center">
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">爆款</div>
+      <div class="text-2xl font-bold text-emerald-300" id="ops-kpi-hot">—</div>
     </div>
-    <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="hotlist">
-      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">待验证</div>
-      <div class="text-2xl font-bold text-emerald-300" id="ops-stat-verify">—</div>
+    <div class="glass rounded-xl p-3 text-center">
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">冷门</div>
+      <div class="text-2xl font-bold text-red-300" id="ops-kpi-cold">—</div>
+    </div>
+    <div class="glass rounded-xl p-3 text-center cursor-pointer hover:bg-white/[0.04] transition" data-action="gotoPage" data-page="tracker">
+      <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">待诊断</div>
+      <div class="text-2xl font-bold text-amber-300" id="ops-kpi-pending">—</div>
     </div>
   </div>
 
-  <!-- 账号运营流水线 -->
+  <!-- LLM 运营总结 -->
+  <div class="glass-strong rounded-xl p-5" id="ops-summary">
+    <div class="text-center text-gray-500 py-4 text-sm">加载中…</div>
+  </div>
+
+  <!-- 问题分布 + 账号概览 -->
+  <div class="grid lg:grid-cols-5 gap-4">
+    <div class="glass rounded-xl p-4 lg:col-span-2" id="ops-issue-dist">
+      <div class="text-center text-gray-500 py-4 text-sm">加载中…</div>
+    </div>
+    <div class="glass rounded-xl p-4 lg:col-span-3">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold flex items-center gap-2"><i data-lucide="users" class="w-4 h-4 text-amber-400"></i>账号概览</h2>
+        <span class="text-[10px] text-gray-500">点击行进入「账号追踪」看完整诊断</span>
+      </div>
+      <div id="ops-account-rows" class="space-y-2">
+        <div class="text-center text-gray-500 py-4 text-sm">加载中…</div>
+      </div>
+      <div id="ops-account-empty" class="hidden text-center py-8 text-gray-500">
+        <i data-lucide="user-plus" class="w-10 h-10 mx-auto mb-3 opacity-30"></i>
+        <div class="text-sm">还没有添加个人账号</div>
+        <p class="text-xs text-gray-600 mt-2">添加账号后，这里会展示每个账号的健康度与文章表现</p>
+        <button class="btn btn-primary mt-4 py-1.5 text-xs" data-action="addMyAccount"><i data-lucide="plus" class="w-3.5 h-3.5"></i>添加账号</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 需关注文章（降级，跨账号） -->
   <div>
-    <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><i data-lucide="git-branch" class="w-4 h-4 text-amber-400"></i>我的账号 · 运营闭环</h2>
-    <div id="ops-account-list" class="space-y-3">
-      <div class="text-center text-gray-500 py-8 text-sm">加载中…</div>
-    </div>
-    <div id="ops-account-empty" class="hidden text-center py-12 text-gray-500">
-      <i data-lucide="user-plus" class="w-10 h-10 mx-auto mb-3 opacity-30"></i>
-      <div class="text-sm">还没有添加个人账号</div>
-      <p class="text-xs text-gray-600 mt-2">添加账号后，这里会展示每个账号的运营闭环进度</p>
-      <button class="btn btn-primary mt-4 py-1.5 text-xs" data-action="addMyAccount"><i data-lucide="plus" class="w-3.5 h-3.5"></i>添加账号</button>
-    </div>
+    <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><i data-lucide="trending-down" class="w-4 h-4 text-red-400"></i>需关注文章<span class="text-[10px] font-normal text-gray-500" id="ops-cold-count"></span></h2>
+    <div id="ops-cold-list" class="grid lg:grid-cols-2 gap-3"></div>
+    <div id="ops-cold-empty" class="hidden glass rounded-xl p-6 text-center text-gray-500 text-sm">暂无降级文章 · 点击账号行的「分析文章」生成诊断</div>
+  </div>
+
+  <!-- 爆款经验（升级，跨账号） -->
+  <div>
+    <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-emerald-400"></i>爆款经验<span class="text-[10px] font-normal text-gray-500" id="ops-hot-count-articles"></span></h2>
+    <div id="ops-hot-list" class="grid lg:grid-cols-2 gap-3"></div>
+    <div id="ops-hot-empty" class="hidden glass rounded-xl p-6 text-center text-gray-500 text-sm">暂无爆款文章</div>
   </div>
 
   <!-- 快捷入口（紧凑） -->

@@ -3,415 +3,289 @@ import { LS } from '../state.js';
 import { esc, fmt, proxyImage } from '../utils.js';
 import { platName } from '../config.js';
 import { initIcons } from '../icons.js';
+import { toast, Modal } from '../components.js';
+
+const ISSUE_LABEL = { topic: '选题', title: '标题', content: '内容' };
+// MP 浏览器插件固定 ID（extension/mp-stats/manifest.json 内置 key 派生）
+const MP_EXT_ID = 'kimpkibmhdimbomifeofhhefckgdhahj';
+
+// 数据新鲜度：N 分钟/小时/天前
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  if (diff < 3600000) return `${Math.max(1, Math.round(diff / 60000))} 分钟前`;
+  if (diff < 86400000) return `${Math.round(diff / 3600000)} 小时前`;
+  return `${Math.round(diff / 86400000)} 天前`;
+}
 
 export async function renderDashboard() {
-  const listEl = document.getElementById('ops-account-list');
-  const emptyEl = document.getElementById('ops-account-empty');
-  if (!listEl) return;
-
-  listEl.innerHTML = '<div class="text-center text-gray-500 py-8 text-sm">加载中…</div>';
+  const rowsEl = document.getElementById('ops-account-rows');
+  if (!rowsEl) return;
 
   try {
-    const [accounts, trackers] = await Promise.all([
-      localApi('my-accounts').catch(() => []),
+    const [overview, summaryData, trackers] = await Promise.all([
+      localApi('dashboard/overview').catch(() => null),
+      localApi('dashboard/summary').catch(() => null),
       localApi('trackers').catch(() => []),
     ]);
 
-    if (!accounts.length) {
-      listEl.classList.add('hidden');
-      emptyEl?.classList.remove('hidden');
-      initIcons(emptyEl || document.getElementById('content-area'));
-      renderQuickStats(trackers);
-      renderSummaryStats([]);
-      return;
-    }
-
-    listEl.classList.remove('hidden');
-    emptyEl?.classList.add('hidden');
-
-    const enriched = await Promise.all(accounts.map(async (acc) => {
-      const trackerId = acc.trackerId || acc.id;
-      const tracker = trackers.find(t => t.id === trackerId);
-      let snapshots = [];
-      try {
-        const trendResp = await localApi(`trackers/${encodeURIComponent(trackerId)}/trend?limit=10`);
-        snapshots = trendResp?.snapshots || trendResp || [];
-        if (!Array.isArray(snapshots)) snapshots = [];
-      } catch {}
-      let wersssArticles = [];
-      if (acc.plat === 'gzh') {
-        try {
-          wersssArticles = await localApi(`wersss/articles?mpName=${encodeURIComponent(acc.name)}&limit=10`);
-          if (!Array.isArray(wersssArticles)) wersssArticles = [];
-        } catch {}
-      }
-      return { ...acc, tracker, snapshots, wersssArticles };
-    }));
-
-    listEl.innerHTML = enriched.map((acc, i) => renderAccountCard(acc, i)).join('');
-    initIcons(listEl);
-
-    listEl.querySelectorAll('[data-expand-toggle]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const idx = btn.dataset.expandToggle;
-        const detail = listEl.querySelector(`[data-expand-detail="${idx}"]`);
-        if (detail) {
-          const isOpen = !detail.classList.contains('hidden');
-          detail.classList.toggle('hidden');
-          btn.querySelector('.expand-icon').style.transform = isOpen ? '' : 'rotate(180deg)';
-        }
-      });
-    });
-
-    renderSummaryStats(enriched);
+    const data = overview || { stats: {}, accounts: [], articles: [] };
+    renderKpis(data.stats);
+    renderSummaryCard(summaryData, data.stats, data.weekActions || []);
+    renderIssueDist(data.stats, data.issueTrend);
+    renderAccountRows(data.accounts);
+    renderArticleLists(data.articles);
     renderQuickStats(trackers);
-
   } catch (e) {
-    listEl.innerHTML = `<div class="text-red-400 text-sm py-4 text-center">${esc(e.message)}</div>`;
+    rowsEl.innerHTML = `<div class="text-red-400 text-sm py-4 text-center">${esc(e.message)}</div>`;
   }
 }
 
-function getLatestSnapshot(acc) {
-  const snaps = (acc.snapshots || []).sort((a, b) =>
-    new Date(b.captured_at || b.snapshot_date) - new Date(a.captured_at || a.snapshot_date)
-  );
-  return { latest: snaps[0], prev: snaps[1], all: snaps, count: snaps.length };
+// ============ KPI 条 ============
+
+function renderKpis(stats = {}) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('ops-kpi-accounts', stats.accountCount ?? 0);
+  set('ops-kpi-score', stats.avgScore ?? '—');
+  set('ops-kpi-analyzed', stats.analyzedArticles ?? 0);
+  set('ops-kpi-hot', stats.hotCount ?? 0);
+  set('ops-kpi-cold', stats.coldCount ?? 0);
+  set('ops-kpi-pending', stats.pendingDiagnose ?? 0);
 }
 
-function renderAccountCard(acc, idx) {
-  const { latest, prev, all, count } = getLatestSnapshot(acc);
-  const score = latest?.score;
-  const prevScore = prev?.score;
-  const trend = (score != null && prevScore != null) ? score - prevScore : null;
+// ============ LLM 运营总结 ============
 
-  let diag = null;
-  try { diag = latest?.report || (latest?.raw_data ? JSON.parse(latest.raw_data) : null); } catch {}
+function renderSummaryCard(summaryData, stats = {}, weekActions = []) {
+  const el = document.getElementById('ops-summary');
+  if (!el) return;
+  const summary = summaryData?.summary;
+  const generatedAt = summaryData?.generatedAt;
 
-  const avatar = proxyImage(acc.avatar);
-  const initial = (acc.name || '?')[0];
-  const platCls = acc.plat === 'dy' ? 'pill-hot' : acc.plat === 'xhs' ? 'pill-brand' : 'pill-green';
-  const lastDate = latest?.snapshot_date || latest?.captured_at;
-  const daysSince = lastDate ? Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000) : null;
+  const genBtn = (label) => `
+    <button class="btn btn-secondary py-1 px-3 text-xs inline-flex items-center gap-1.5" data-action="generateSummary">
+      <i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>${label}</span>
+    </button>`;
 
-  let alertBadge = '';
-  if (!latest) alertBadge = '<span class="pill pill-gray !text-[10px]">未诊断</span>';
-  else if (daysSince > 7) alertBadge = `<span class="pill pill-amber !text-[10px]">${daysSince}天未更新</span>`;
-  else if (score != null && score < 60) alertBadge = '<span class="pill pill-hot !text-[10px]">需优化</span>';
-  else alertBadge = '<span class="pill pill-green !text-[10px]">健康</span>';
+  // 本周行动：有持久化清单则渲染可勾选（闭环跟踪），否则回退总结里的纯文本
+  const actionItem = (a) => {
+    const done = a.status === 'done';
+    const dismissed = a.status === 'dismissed';
+    return `
+      <li class="text-xs leading-relaxed flex items-start gap-1.5 group ${done ? 'text-gray-500 line-through' : dismissed ? 'text-gray-600' : 'text-gray-300'}">
+        <button class="flex-shrink-0 mt-0.5 ${done ? 'text-emerald-400' : 'text-gray-500 hover:text-emerald-400'}" data-action="setActionStatus" data-id="${a.id}" data-status="${done ? 'pending' : 'done'}" title="${done ? '标记未做' : '标记完成'}">
+          <i data-lucide="${done ? 'check-circle-2' : 'circle'}" class="w-3.5 h-3.5"></i>
+        </button>
+        <span class="flex-1 min-w-0">${esc(a.text)}</span>
+        ${!done && !dismissed ? `<button class="flex-shrink-0 text-gray-600 hover:text-gray-400 opacity-0 group-hover:opacity-100" data-action="setActionStatus" data-id="${a.id}" data-status="dismissed" title="忽略"><i data-lucide="x" class="w-3 h-3"></i></button>` : ''}
+      </li>`;
+  };
+  const actionsHtml = weekActions.length
+    ? weekActions.filter(a => a.status !== 'dismissed').map(actionItem).join('') || '<li class="text-xs text-gray-600">—</li>'
+    : (summary?.actions || []).map(a => `<li class="text-xs text-gray-300 leading-relaxed flex gap-1.5"><span class="text-amber-400 flex-shrink-0">▸</span>${esc(a)}</li>`).join('') || '<li class="text-xs text-gray-600">—</li>';
 
-  const scoreDisplay = score != null ? score.toFixed(1) : '—';
-  const scoreColor = score != null && score < 60 ? 'text-red-300'
-    : score != null && score >= 80 ? 'text-emerald-300' : 'text-gray-200';
-  const trendDisplay = trend != null
-    ? (trend > 0 ? `<span class="text-emerald-400 text-xs">▲${trend.toFixed(1)}</span>`
-       : trend < 0 ? `<span class="text-red-400 text-xs">▼${Math.abs(trend).toFixed(1)}</span>`
-       : `<span class="text-gray-500 text-xs">—</span>`)
-    : '';
+  let body;
+  if (summary) {
+    const timeStr = generatedAt ? new Date(generatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    body = `
+      ${summary.overall ? `<p class="text-sm text-gray-200 leading-relaxed mb-4">${esc(summary.overall)}</p>` : ''}
+      ${summary.actionReview ? `<div class="text-xs text-gray-200 bg-white/5 border border-white/10 rounded-lg px-3 py-2 mb-4 leading-relaxed"><span class="font-medium">上周回顾：</span>${esc(summary.actionReview)}</div>` : ''}
+      <div class="grid md:grid-cols-3 gap-4">
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-red-400/80 mb-2">关键问题</div>
+          <ul class="space-y-1.5">${(summary.keyProblems || []).map(p => `<li class="text-xs text-gray-300 leading-relaxed flex gap-1.5"><span class="text-red-400 flex-shrink-0">▸</span>${esc(p)}</li>`).join('') || '<li class="text-xs text-gray-600">—</li>'}</ul>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-amber-400/80 mb-2">本周行动${weekActions.length ? `（${weekActions.filter(a => a.status === 'done').length}/${weekActions.length}）` : ''}</div>
+          <ul class="space-y-1.5">${actionsHtml}</ul>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-wider text-emerald-400/80 mb-2">亮点</div>
+          <ul class="space-y-1.5">${(summary.highlights || []).map(h => `<li class="text-xs text-gray-300 leading-relaxed flex gap-1.5"><span class="text-emerald-400 flex-shrink-0">▸</span>${esc(h)}</li>`).join('') || '<li class="text-xs text-gray-600">—</li>'}</ul>
+        </div>
+      </div>
+      <div class="flex items-center justify-between mt-4 pt-3 border-t border-white/5">
+        <span class="text-[10px] text-gray-600">${timeStr ? `生成于 ${timeStr} · ` : ''}基于 ${stats.analyzedArticles ?? 0} 篇文章诊断与 ${stats.diagnosedCount ?? 0} 个账号评分</span>
+        ${genBtn('重新生成')}
+      </div>`;
+  } else {
+    const hasData = (stats.analyzedArticles ?? 0) > 0 || (stats.diagnosedCount ?? 0) > 0;
+    body = `
+      <div class="text-center py-6">
+        <i data-lucide="clipboard-list" class="w-8 h-8 mx-auto mb-2 text-gray-600"></i>
+        <div class="text-sm text-gray-400">还没有运营总结</div>
+        <p class="text-xs text-gray-600 mt-1 mb-4">${hasData ? '基于已有的账号评分与文章诊断，让 LLM 生成整体运营建议' : '先在「账号追踪」诊断账号、点「分析文章」生成文章诊断，再来生成总结'}</p>
+        ${hasData ? genBtn('生成运营总结') : ''}
+      </div>`;
+  }
 
-  const dimensions = diag?.dimensions || [];
-  const dimBars = dimensions.map(d => {
-    const pct = d.max ? (d.score / d.max * 100).toFixed(0) : 0;
-    const tone = pct >= 75 ? 'bg-emerald-400' : pct >= 60 ? 'bg-amber-400' : 'bg-red-400';
+  el.innerHTML = `
+    <div class="flex items-center gap-2 mb-4">
+      <i data-lucide="brain" class="w-4 h-4 text-amber-400"></i>
+      <h2 class="text-sm font-semibold">运营总结</h2>
+      <span class="text-[10px] text-gray-500">LLM 基于真实数据生成</span>
+    </div>
+    ${body}`;
+  initIcons(el);
+}
+
+// 周行动勾选：完成/忽略/撤销，然后刷新 dashboard
+export async function setActionStatus(el, d) {
+  try {
+    await localApi(`dashboard/actions/${d.id}`, { method: 'POST', body: { status: d.status } });
+    await renderDashboard();
+  } catch (e) {
+    toast(`更新失败：${e.message}`, 'error');
+  }
+}
+
+// LLM 运营总结：手动生成（有 LLM 调用成本，故不自动生成）
+export async function generateSummary(el) {
+  const btn = el?.closest('button');
+  const originalHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'pointer-events-none');
+    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i><span>生成中…</span>';
+    initIcons(btn);
+  }
+  toast('正在生成运营总结（约 10-30 秒）…', 'info');
+  try {
+    await localApi('dashboard/summary', { method: 'POST' });
+    toast('运营总结已生成', 'success');
+    await renderDashboard();
+  } catch (e) {
+    toast(`生成失败：${e.message}`, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-60', 'pointer-events-none');
+      btn.innerHTML = originalHtml;
+      initIcons(btn);
+    }
+  }
+}
+
+// ============ 问题分布 ============
+
+function renderIssueDist(stats = {}, issueTrend = null) {
+  const el = document.getElementById('ops-issue-dist');
+  if (!el) return;
+  const issueDist = stats.issueDist || { topic: 0, title: 0, content: 0 };
+  const issueTotal = issueDist.topic + issueDist.title + issueDist.content;
+  const perfTotal = (stats.hotCount ?? 0) + (stats.normalCount ?? 0) + (stats.coldCount ?? 0);
+
+  const deltaBadge = (key) => {
+    const d = issueTrend?.delta?.[key];
+    if (d == null) return '';
+    if (d === 0) return '<span class="text-[10px] text-gray-600 ml-1">±0</span>';
+    // 短板变多是坏事（红），变少是好事（绿）
+    const cls = d > 0 ? 'text-red-400/80' : 'text-emerald-400/80';
+    return `<span class="text-[10px] ${cls} ml-1">${d > 0 ? '+' : ''}${d}</span>`;
+  };
+
+  const bar = (label, count, total, color, textColor, trendKey) => {
+    const pct = total ? Math.round(count / total * 100) : 0;
     return `
       <div class="flex items-center gap-2">
-        <span class="text-[11px] text-gray-400 w-24 flex-shrink-0">${esc(d.name)}</span>
+        <span class="text-[11px] text-gray-400 w-10 flex-shrink-0">${label}</span>
         <div class="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden">
-          <div class="h-full rounded-full ${tone}" style="width:${pct}%"></div>
+          <div class="h-full rounded-full ${color}" style="width:${Math.max(pct, count ? 6 : 0)}%"></div>
         </div>
-        <span class="text-[11px] font-mono w-12 text-right ${pct >= 75 ? 'text-emerald-300' : pct >= 60 ? 'text-amber-300' : 'text-red-300'}">${d.score}/${d.max}</span>
+        <span class="text-[11px] font-mono w-8 text-right ${textColor}">${count}</span>${trendKey ? deltaBadge(trendKey) : ''}
       </div>`;
-  }).join('');
+  };
 
-  const benchmark = diag?.scores?.['行业对标'];
-  const benchmarkRows = benchmark ? Object.entries(benchmark).slice(0, 4).map(([metric, data]) => {
-    if (!data || typeof data !== 'object') return '';
+  el.innerHTML = `
+    <h2 class="text-sm font-semibold flex items-center gap-2 mb-3"><i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i>问题分布</h2>
+    <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">短板维度（${issueTotal} 篇有诊断）${issueTrend ? `<span class="normal-case text-gray-600">· 较 ${issueTrend.prevWeek.slice(5)} 当周</span>` : ''}</div>
+    <div class="space-y-2 mb-4">
+      ${bar('选题', issueDist.topic, issueTotal, 'bg-amber-400', 'text-amber-400', 'topic')}
+      ${bar('标题', issueDist.title, issueTotal, 'bg-sky-400', 'text-sky-400', 'title')}
+      ${bar('内容', issueDist.content, issueTotal, 'bg-slate-400', 'text-slate-400', 'content')}
+    </div>
+    <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">表现分布（${perfTotal} 篇已分析）</div>
+    <div class="space-y-2">
+      ${bar('爆款', stats.hotCount ?? 0, perfTotal, 'bg-emerald-400', 'text-emerald-300')}
+      ${bar('常规', stats.normalCount ?? 0, perfTotal, 'bg-gray-400', 'text-gray-300')}
+      ${bar('冷门', stats.coldCount ?? 0, perfTotal, 'bg-red-400', 'text-red-300')}
+    </div>
+    ${!perfTotal ? '<div class="text-[11px] text-gray-600 mt-3">还没有文章分析数据，点击账号行的「分析文章」开始</div>' : ''}`;
+  initIcons(el);
+}
+
+// ============ 账号概览（紧凑行） ============
+
+function renderAccountRows(accounts = []) {
+  const rowsEl = document.getElementById('ops-account-rows');
+  const emptyEl = document.getElementById('ops-account-empty');
+  if (!rowsEl) return;
+
+  if (!accounts.length) {
+    rowsEl.innerHTML = '';
+    rowsEl.classList.add('hidden');
+    emptyEl?.classList.remove('hidden');
+    initIcons(emptyEl || rowsEl);
+    return;
+  }
+  rowsEl.classList.remove('hidden');
+  emptyEl?.classList.add('hidden');
+
+  rowsEl.innerHTML = accounts.map(acc => {
+    const avatar = proxyImage(acc.avatar);
+    const initial = (acc.name || '?')[0];
+    const platCls = acc.plat === 'dy' ? 'pill-hot' : acc.plat === 'xhs' ? 'pill-brand' : 'pill-green';
+    const score = acc.score;
+    const scoreColor = score == null ? 'text-gray-600'
+      : score < 60 ? 'text-red-300' : score >= 80 ? 'text-emerald-300' : 'text-gray-200';
+    const trendHtml = acc.trend != null
+      ? (acc.trend > 0 ? `<span class="text-emerald-400">▲${acc.trend.toFixed(1)}</span>`
+         : acc.trend < 0 ? `<span class="text-red-400">▼${Math.abs(acc.trend).toFixed(1)}</span>`
+         : '<span class="text-gray-600">—</span>')
+      : '';
+    const stalePill = score == null
+      ? '<span class="pill pill-gray !text-[10px]">未诊断</span>'
+      : acc.daysSince > 7 ? `<span class="pill pill-amber !text-[10px]">${acc.daysSince}天前</span>` : '';
+    const issuePill = acc.topIssue
+      ? `<span class="pill pill-hot !text-[10px]">短板·${ISSUE_LABEL[acc.topIssue] || acc.topIssue}</span>` : '';
+    const spark = (acc.scoreHistory || []).length >= 2 ? renderSparkline(acc.scoreHistory) : '';
+    const perfStr = acc.analyzed
+      ? `<span class="text-emerald-400/80">${acc.hot} 爆</span><span class="text-gray-600 mx-1">·</span><span class="text-red-400/80">${acc.cold} 冷</span><span class="text-gray-600 mx-1">·</span><span class="text-gray-500">${acc.analyzed} 篇</span>`
+      : '<span class="text-gray-600">未分析</span>';
+
     return `
-      <div class="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-0">
-        <span class="text-[11px] text-gray-400">${esc(metric)}</span>
-        <div class="flex items-center gap-3 text-[11px]">
-          <span class="text-gray-300 font-medium">${esc(data['本账号'] || '—')}</span>
-          <span class="text-gray-600">行业 ${esc(data['行业均值'] || '—')}</span>
-          <span class="text-gray-600">头部 ${esc(data['头部账号'] || '—')}</span>
-        </div>
-      </div>`;
-  }).join('') : '';
-
-  const strengths = (diag?.scores?.['优势模块'] || []).map(s =>
-    `<span class="pill pill-green !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
-  ).join('');
-  const weaknesses = (diag?.scores?.['待优化模块'] || []).map(s =>
-    `<span class="pill pill-amber !text-[10px] !py-0.5">${esc(s['维度名'])} ${s['得分率']}%</span>`
-  ).join('');
-
-  const competitors = (diag?.similar_accounts || []).slice(0, 5).map(c =>
-    `<span class="pill pill-gray !text-[10px] !py-0.5">${esc(c['账号名称'] || c.name || '?')}</span>`
-  ).join('');
-
-  const trackBadges = (acc.tracks || []).slice(0, 3).map(t =>
-    `<span class="pill pill-gray !text-[10px] !py-0 !px-1.5">${esc(t)}</span>`
-  ).join('');
-
-  const scoreHist = all.slice(0, 8).reverse().map(s => s.score).filter(v => v != null);
-  const sparkline = scoreHist.length >= 2 ? renderSparkline(scoreHist) : '';
-
-  // 阅读量趋势图 + 作品卡片
-  const hasRedfoxWorks = Array.isArray(diag?.works) && diag.works.length > 0;
-  const worksBlock = renderWorksSection(diag?.works, hasRedfoxWorks ? null : acc.wersssArticles);
-
-  let analysisBlock = '';
-  try {
-    const analysis = latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis
-      : latest?.analysis ? JSON.parse(latest.analysis) : null;
-    if (analysis && analysis.summary && !analysis.summary.includes('失败') && !analysis.summary.includes('降级')) {
-      const actions = (analysis.actions || []).slice(0, 3).map(a => `<li class="text-[11px] text-gray-400">${esc(a)}</li>`).join('');
-      const risks = (analysis.risks || []).slice(0, 2).map(r => `<li class="text-[11px] text-amber-300/80">${esc(r)}</li>`).join('');
-      if (actions || risks) {
-        analysisBlock = `
-          <div class="mt-3 p-3 bg-white/[0.02] rounded-lg space-y-1.5">
-            ${risks ? `<div><span class="text-[10px] uppercase text-amber-400/70 tracking-wider">风险</span><ul class="mt-1 space-y-0.5">${risks}</ul></div>` : ''}
-            ${actions ? `<div><span class="text-[10px] uppercase text-cyan-400/70 tracking-wider">建议</span><ul class="mt-1 space-y-0.5">${actions}</ul></div>` : ''}
-          </div>`;
-      }
-    }
-  } catch {}
-
-  const hasDetail = Boolean(dimBars || benchmarkRows || strengths || weaknesses || competitors || worksBlock);
-
-  return `
-    <div class="glass rounded-xl p-4 hover:bg-white/[0.02] transition">
-      <div class="flex items-start gap-3 cursor-pointer" data-action="gotoPage" data-page="tracker">
-        <div class="account-avatar flex-shrink-0" style="width:40px;height:40px;font-size:15px;">
+      <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/[0.03] transition cursor-pointer" data-action="gotoPage" data-page="tracker">
+        <div class="account-avatar flex-shrink-0" style="width:32px;height:32px;font-size:12px;">
           ${initial}${avatar ? `<img src="${avatar}" alt="" data-image-error="remove" />` : ''}
         </div>
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="font-semibold text-sm truncate">${esc(acc.name)}</span>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-sm font-medium truncate">${esc(acc.name)}</span>
             <span class="pill ${platCls} !text-[10px] !py-0 flex-shrink-0">${esc(platName(acc.plat))}</span>
-            ${alertBadge}
-            ${acc.styleProfile ? '<span class="pill pill-cyan !text-[10px] !py-0 flex-shrink-0">风格</span>' : ''}
+            ${stalePill}${issuePill}
           </div>
-          ${trackBadges ? `<div class="flex flex-wrap gap-1 mb-1">${trackBadges}</div>` : ''}
-          <div class="text-[10px] text-gray-600">
-            ${count ? `${count} 次诊断` : '无诊断'}${lastDate ? ` · ${new Date(lastDate).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}` : ''}${diag?.header?.['平均阅读数'] ? ` · 均阅 ${fmt(diag.header['平均阅读数'])}` : ''}
-          </div>
+          <div class="text-[10px] mt-0.5">${perfStr}</div>
         </div>
-        <div class="flex-shrink-0 text-right flex items-end gap-2">
-          ${sparkline}
-          <div>
-            <div class="flex items-baseline gap-1 justify-end">
-              <span class="text-2xl font-bold ${scoreColor}">${scoreDisplay}</span>
-              <span class="text-[10px] text-gray-600">分</span>
-            </div>
-            <div class="text-right">${trendDisplay}</div>
-          </div>
+        <div class="flex-shrink-0 hidden sm:block">${spark}</div>
+        <div class="flex-shrink-0 text-right w-16">
+          <div class="text-lg font-bold leading-none ${scoreColor}">${score != null ? score.toFixed(1) : '—'}</div>
+          <div class="text-[10px] mt-0.5">${trendHtml}</div>
         </div>
-      </div>
-
-      ${hasDetail ? `
-      <button class="w-full mt-2 flex items-center justify-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 py-1" data-expand-toggle="${idx}">
-        <span>诊断明细</span>
-        <i data-lucide="chevron-down" class="w-3 h-3 expand-icon transition-transform" style="transform:rotate(180deg)"></i>
-      </button>
-
-      <div class="mt-2 pt-3 border-t border-white/5 space-y-4" data-expand-detail="${idx}">
-
-        ${worksBlock}
-
-        ${dimBars ? `<div>
-          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">维度评分</div>
-          <div class="space-y-1.5">${dimBars}</div>
-        </div>` : ''}
-
-        ${strengths || weaknesses ? `<div class="grid grid-cols-2 gap-3">
-          ${strengths ? `<div><div class="text-[10px] uppercase tracking-wider text-emerald-400/70 mb-1.5">优势</div><div class="flex flex-wrap gap-1">${strengths}</div></div>` : '<div></div>'}
-          ${weaknesses ? `<div><div class="text-[10px] uppercase tracking-wider text-amber-400/70 mb-1.5">待优化</div><div class="flex flex-wrap gap-1">${weaknesses}</div></div>` : ''}
-        </div>` : ''}
-
-        ${benchmarkRows ? `<div>
-          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">行业对标</div>
-          ${benchmarkRows}
-        </div>` : ''}
-
-        ${competitors ? `<div>
-          <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">相似竞品</div>
-          <div class="flex flex-wrap gap-1">${competitors}</div>
-        </div>` : ''}
-
-        ${analysisBlock}
-
-      </div>` : ''}
-    </div>
-  `;
-}
-
-// ============ 作品阅读量：趋势图 + 卡片列表 ============
-
-function renderWorksSection(works, wersssArticles) {
-  // 合并诊断作品 + WeRss
-  const parsed = [];
-  if (Array.isArray(works)) {
-    for (const w of works) {
-      const rawTitle = String(w['标题'] || w.title || '');
-      const title = (rawTitle.match(/^\[([^\]]+)\]\(/)?.[1] || rawTitle.replace(/\]\(https?:\/\/[^\)]*\)$/, '').replace(/^\[/, '')).trim();
-      parsed.push({
-        title: title.slice(0, 50),
-        reads: Number(w['阅读数'] || w.reads || 0),
-        likes: Number(w['点赞数'] || w.likes || 0),
-        comments: Number(w['评论数'] || w.comments || 0),
-        watch: Number(w['在看数'] || w.watch || 0),
-        date: w['发布时间'] || w.date || '',
-        url: rawTitle.match(/\((https?:\/\/[^\)]+)\)/)?.[1] || '',
-        source: '诊断',
-      });
-    }
-  }
-  if (!parsed.length && Array.isArray(wersssArticles)) {
-    for (const a of wersssArticles) {
-      parsed.push({
-        title: String(a.title || '').trim().slice(0, 50),
-        reads: 0, likes: 0, comments: 0, watch: 0,
-        date: a.publishTime ? new Date(Number(a.publishTime)).toISOString() : '',
-        url: a.url || '', source: 'WeRss',
-      });
-    }
-  }
-  if (!parsed.length) return '';
-
-  // 按日期排序（旧→新，用于趋势图）
-  const sorted = [...parsed].sort((a, b) => new Date(a.date) - new Date(b.date));
-  const withReads = sorted.filter(w => w.reads > 0);
-
-  // 统计
-  const maxRead = withReads.length ? Math.max(...withReads.map(w => w.reads)) : 0;
-  const avgRead = withReads.length ? Math.round(withReads.reduce((s, w) => s + w.reads, 0) / withReads.length) : 0;
-  const totalReads = sorted.reduce((s, w) => s + w.reads, 0);
-  const totalLikes = sorted.reduce((s, w) => s + w.likes, 0);
-  const totalComments = sorted.reduce((s, w) => s + w.comments, 0);
-  const engagementRate = totalReads ? ((totalLikes + totalComments) / totalReads * 100).toFixed(1) : '—';
-
-  // 分类：爆款/冷门/常规
-  let best = null, worst = null;
-  if (withReads.length >= 2) {
-    best = withReads.reduce((a, b) => a.reads > b.reads ? a : b);
-    worst = withReads.reduce((a, b) => a.reads < b.reads ? a : b);
-  }
-
-  // 趋势图（面积折线）
-  const trendChart = withReads.length >= 2 ? renderReadsChart(withReads) : '';
-
-  // 作品卡片列表（新→旧）
-  const cardList = [...parsed].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10).map(w => {
-    const dateStr = w.date ? new Date(w.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
-    const hasData = w.reads > 0;
-    // 分类
-    let tier, tierLabel, tierColor, barColor;
-    if (!hasData) {
-      tier = 'none'; tierLabel = '无数据'; tierColor = 'text-gray-600'; barColor = 'bg-gray-600';
-    } else if (best && w.title === best.title) {
-      tier = 'hot'; tierLabel = '爆款'; tierColor = 'text-emerald-300'; barColor = 'bg-emerald-400';
-    } else if (worst && w.title === worst.title && best !== worst) {
-      tier = 'cold'; tierLabel = '冷门'; tierColor = 'text-red-300'; barColor = 'bg-red-400';
-    } else {
-      tier = 'normal'; tierLabel = '常规'; tierColor = 'text-amber-300'; barColor = 'bg-amber-400';
-    }
-    const barPct = hasData && maxRead ? Math.max((w.reads / maxRead * 100), 8).toFixed(0) : 0;
-    const sourceTag = w.source === 'WeRss' ? '<span class="text-[9px] text-cyan-500">RSS</span>' : '';
-    const link = w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener" class="hover:text-amber-300">` : '<div>';
-    const linkEnd = w.url ? '</a>' : '</div>';
-
-    return `
-      <div class="bg-white/[0.02] rounded-lg p-2.5 border-l-2 ${tier === 'hot' ? 'border-emerald-400' : tier === 'cold' ? 'border-red-400' : tier === 'normal' ? 'border-amber-400' : 'border-gray-700'}">
-        ${link}<div class="text-[10px] text-gray-200 font-medium leading-tight line-clamp-2 mb-1">${esc(w.title)}</div>${linkEnd}
-        ${hasData ? `
-        <div class="h-1 rounded-full bg-white/[0.06] overflow-hidden mb-1.5">
-          <div class="h-full rounded-full ${barColor}" style="width:${barPct}%"></div>
-        </div>
-        <div class="flex items-center justify-between text-[9px]">
-          <span class="${tierColor} font-bold">📖 ${fmt(w.reads)}</span>
-          <span class="text-gray-500">👍${fmt(w.likes)} 💬${fmt(w.comments)}</span>
-        </div>` : '<div class="text-[9px] text-gray-700">无数据</div>'}
+        <button class="btn btn-secondary py-1 px-2.5 text-[11px] flex-shrink-0 inline-flex items-center gap-1" data-action="analyzeMyWorks" data-id="${esc(acc.id)}" title="RedFox 数据 + LLM 逐篇诊断选题/标题/内容">
+          <i data-lucide="sparkles" class="w-3 h-3"></i><span>分析文章</span>
+        </button>
+        ${acc.plat === 'gzh' ? `
+        <button class="btn btn-secondary py-1 px-2.5 text-[11px] flex-shrink-0 inline-flex items-center gap-1" data-action="syncMpOfficial" data-id="${esc(acc.id)}" title="同步微信公众平台官方 T+1 阅读数据（需配置 MP_APP_ID/MP_APP_SECRET）">
+          <i data-lucide="shield-check" class="w-3 h-3"></i><span>官方数据</span>
+        </button>
+        <button class="btn btn-secondary py-1 px-2.5 text-[11px] flex-shrink-0 inline-flex items-center gap-1" data-action="fetchMpStats" title="调用浏览器插件，用你已登录的公众号后台会话抓一次准实时数据">
+          <i data-lucide="download" class="w-3 h-3"></i><span>浏览器取数</span>
+        </button>` : ''}
       </div>`;
   }).join('');
-
-  return `
-    <div>
-      <div class="flex items-center justify-between mb-3">
-        <div class="text-[10px] uppercase tracking-wider text-gray-500">作品阅读量</div>
-        <div class="flex items-center gap-3 text-[10px] text-gray-500">
-          ${avgRead ? `<span>均阅 <span class="text-gray-300 font-medium">${fmt(avgRead)}</span></span>` : ''}
-          <span>互动率 <span class="text-gray-300 font-medium">${engagementRate}%</span></span>
-          <span>${parsed.length} 篇</span>
-        </div>
-      </div>
-
-      ${trendChart}
-
-      <div class="flex items-center gap-3 mb-2 text-[10px]">
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>爆款</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span>常规</span>
-        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400"></span>冷门</span>
-      </div>
-
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        ${cardList}
-      </div>
-
-      ${best && worst ? `
-      <div class="flex items-center gap-4 mt-2 text-[10px]">
-        <span class="text-emerald-400/80">▲ 爆款 ${esc(best.title.slice(0,16))}… ${fmt(best.reads)}</span>
-        <span class="text-red-400/60">▼ 冷门 ${esc(worst.title.slice(0,16))}… ${fmt(worst.reads)}</span>
-      </div>` : ''}
-    </div>`;
-}
-
-function renderReadsChart(works) {
-  const w = 100; // percentage width
-  const h = 60;
-  const pad = { l: 4, r: 4, t: 6, b: 14 };
-  const reads = works.map(x => x.reads);
-  const max = Math.max(...reads);
-  const min = Math.min(...reads);
-  const range = max - min || max || 1;
-  const cw = w - pad.l - pad.r;
-  const ch = h - pad.t - pad.b;
-  const step = cw / (works.length - 1);
-
-  const points = works.map((x, i) => {
-    const px = pad.l + i * step;
-    const py = pad.t + ch - ((x.reads - min) / range) * ch;
-    return { x: px, y: py, read: x.reads, date: x.date };
-  });
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const areaPath = linePath + ` L ${points[points.length - 1].x.toFixed(1)} ${pad.t + ch} L ${points[0].x.toFixed(1)} ${pad.t + ch} Z`;
-  const labels = points.map((p, i) => {
-    const d = p.date ? new Date(p.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
-    const readLabel = `<text x="${p.x.toFixed(1)}" y="${(p.y - 3).toFixed(1)}" fill="#94a3b8" font-size="5" text-anchor="middle">${fmt(p.read)}</text>`;
-    const dateLabel = `<text x="${p.x.toFixed(1)}" y="${(h - 3).toFixed(1)}" fill="#475569" font-size="4.5" text-anchor="middle">${d}</text>`;
-    return readLabel + dateLabel;
-  }).join('');
-  const dots = points.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.2" fill="#fbbf24" />`).join('');
-
-  return `
-    <div class="mb-3">
-      <svg viewBox="0 0 ${w} ${h}" class="w-full" style="height:80px" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="readsGrad${Math.random().toString(36).slice(2,6)}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.25" />
-            <stop offset="100%" stop-color="#fbbf24" stop-opacity="0" />
-          </linearGradient>
-        </defs>
-        <path d="${areaPath}" fill="url(#readsGrad)" />
-        <path d="${linePath}" fill="none" stroke="#fbbf24" stroke-width="0.6" stroke-linejoin="round" stroke-linecap="round" />
-        ${dots}
-        ${labels}
-      </svg>
-    </div>`;
+  initIcons(rowsEl);
 }
 
 function renderSparkline(values) {
-  const w = 48, h = 20, pad = 2;
+  const w = 56, h = 22, pad = 2;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -422,41 +296,88 @@ function renderSparkline(values) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const isUp = values[values.length - 1] >= values[0];
-  const color = isUp ? '#34d399' : '#f87171';
+  const color = isUp ? '#059669' : '#dc2626';
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
     <polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" />
   </svg>`;
 }
 
-function renderSummaryStats(accounts) {
-  let totalScore = 0, scoreCount = 0, needAttention = 0, totalDiag = 0;
-  for (const acc of accounts) {
-    const snaps = acc.snapshots || [];
-    totalDiag += snaps.length;
-    if (snaps.length) {
-      const s = getLatestSnapshot(acc).latest;
-      if (s?.score != null) {
-        totalScore += s.score;
-        scoreCount++;
-        if (s.score < 65) needAttention++;
-      }
-    }
+// ============ 文章诊断列表（需关注 / 爆款经验） ============
+
+function renderArticleLists(articles = []) {
+  const cold = articles
+    .filter(a => a.performance === 'cold')
+    .sort((a, b) => (a.ratio ?? 99) - (b.ratio ?? 99))
+    .slice(0, 10);
+  const hot = articles
+    .filter(a => a.performance === 'hot')
+    .sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))
+    .slice(0, 10);
+
+  const coldList = document.getElementById('ops-cold-list');
+  const hotList = document.getElementById('ops-hot-list');
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? `${n} 篇` : ''; };
+  setCount('ops-cold-count', cold.length);
+  setCount('ops-hot-count-articles', hot.length);
+
+  if (coldList) {
+    coldList.innerHTML = cold.map(a => renderArticleCard(a, 'cold')).join('');
+    coldList.classList.toggle('hidden', !cold.length);
+    initIcons(coldList);
   }
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  const labels = { 'ops-stat-analyze': '待诊断', 'ops-stat-issues': '需关注', 'ops-stat-topics': '平均分', 'ops-stat-creating': '总诊断', 'ops-stat-verify': '有风格' };
-  for (const [id, label] of Object.entries(labels)) {
-    const el = document.getElementById(id);
-    if (el) {
-      const labelEl = el.previousElementSibling;
-      if (labelEl) labelEl.textContent = label;
-    }
+  document.getElementById('ops-cold-empty')?.classList.toggle('hidden', Boolean(cold.length));
+  if (hotList) {
+    hotList.innerHTML = hot.map(a => renderArticleCard(a, 'hot')).join('');
+    hotList.classList.toggle('hidden', !hot.length);
+    initIcons(hotList);
   }
-  set('ops-stat-analyze', accounts.length - scoreCount);
-  set('ops-stat-issues', needAttention);
-  set('ops-stat-topics', scoreCount ? (totalScore / scoreCount).toFixed(0) : '—');
-  set('ops-stat-creating', totalDiag);
-  set('ops-stat-verify', accounts.filter(a => a.styleProfile).length);
+  document.getElementById('ops-hot-empty')?.classList.toggle('hidden', Boolean(hot.length));
 }
+
+function renderArticleCard(a, kind) {
+  const isCold = kind === 'cold';
+  const borderCls = isCold ? 'border-l-red-400/60' : 'border-l-emerald-400/60';
+  const avatar = proxyImage(a.avatar);
+  const ana = a.analysis || {};
+  const ratioChip = a.ratio != null
+    ? `<span class="pill ${isCold ? 'pill-hot' : 'pill-green'} !text-[10px] !py-0">${a.ratio}x 均阅</span>` : '';
+  const issuePill = ana.mainIssue && ana.mainIssue !== 'none'
+    ? `<span class="pill pill-hot !text-[10px] !py-0">短板·${ISSUE_LABEL[ana.mainIssue] || '其他'}</span>` : '';
+  const scoreChip = (label, val) => val != null
+    ? `<span class="${val >= 4 ? 'text-emerald-300' : val >= 3 ? 'text-amber-300' : 'text-red-300'}">${label} ${val}/5</span>` : '';
+  const scores = [scoreChip('选题', ana.topicScore), scoreChip('标题', ana.titleScore), scoreChip('内容', ana.contentScore)].filter(Boolean);
+  const titleHtml = a.url
+    ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" class="hover:text-amber-300 transition">${esc(a.title)}</a>`
+    : esc(a.title);
+
+  return `
+    <div class="glass rounded-xl p-4 border-l-2 ${borderCls}">
+      <div class="flex items-start justify-between gap-2 mb-2">
+        <div class="text-[13px] font-medium leading-snug line-clamp-2 min-w-0">${titleHtml}</div>
+        <div class="flex items-center gap-1 flex-shrink-0">${ratioChip}${issuePill}</div>
+      </div>
+      <div class="flex items-center gap-1.5 mb-2.5 text-[10px] text-gray-500">
+        <div class="account-avatar" style="width:16px;height:16px;font-size:9px;">
+          ${(a.accountName || '?')[0]}${avatar ? `<img src="${avatar}" alt="" data-image-error="remove" />` : ''}
+        </div>
+        <span class="truncate">${esc(a.accountName)}</span>
+        <span class="text-gray-700">·</span>
+        <span>阅读 ${fmt(a.reads)}${a.baselineReads ? ` / 基线 ${fmt(a.baselineReads)}` : ''}</span>
+        ${scores.length ? `<span class="text-gray-700">·</span><span class="flex gap-2">${scores.join('')}</span>` : ''}
+      </div>
+      ${ana.issueDetail ? `<div class="text-[11px] text-red-300/90 leading-relaxed mb-1.5">短板：${esc(ana.issueDetail)}</div>` : ''}
+      ${ana.why ? `<div class="text-[11px] text-gray-400 leading-relaxed ${isCold ? 'mb-1.5' : ''}">${isCold ? '原因：' : '经验：'}${esc(ana.why)}</div>` : ''}
+      ${isCold && (ana.suggestions || []).length ? `
+        <ul class="mt-1.5 pt-1.5 border-t border-white/5 space-y-1">
+          ${ana.suggestions.map(s => `<li class="text-[11px] text-gray-300 leading-relaxed flex gap-1.5"><span class="flex-shrink-0 text-amber-400">▸</span>${esc(s)}</li>`).join('')}
+        </ul>` : ''}
+      <div class="mt-2 pt-1.5 border-t border-white/5 text-[9px] text-gray-600">
+        分析于 ${timeAgo(a.updatedAt)}${a.statsSyncedAt ? ` · 阅读数据为 ${new Date(a.statsSyncedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })} 快照` : ' · 阅读数据来自诊断快照'}
+      </div>
+    </div>`;
+}
+
+// ============ 快捷入口统计 ============
 
 async function renderQuickStats(trackers) {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -469,4 +390,196 @@ async function renderQuickStats(trackers) {
   set('ops-lib-count', `${lib.length} 条收藏`);
 }
 
-export async function renderFeedAndHistory() {}
+// tracker 数据变化（同步/诊断）后由 app.js、tracker.js 回调刷新 dashboard
+export async function renderFeedAndHistory() {
+  if (document.getElementById('ops-account-rows')) await renderDashboard();
+}
+
+// 文章级表现分析：RedFox 数据 + LLM 逐篇诊断选题/标题/内容
+export async function analyzeMyWorks(el, d) {
+  const btn = el?.closest('button');
+  const originalHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'pointer-events-none');
+    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i><span>分析中…</span>';
+    initIcons(btn);
+  }
+  toast('正在分析文章表现（约 1-2 分钟）…', 'info');
+  try {
+    const result = await localApi(`my-accounts/${encodeURIComponent(d.id)}/analyze-works`, { method: 'POST' });
+    if (!result.analyzed) toast(result.message || '没有可分析的作品', 'info');
+    else toast(`已分析 ${result.analyzed} 篇文章${result.observing ? `，${result.observing} 篇未满 48h 观察中` : ''}`, 'success');
+    if (result.mpSync?.errcode === 40164) {
+      toast('官方数据同步被拒：当前 IP 不在白名单，可一键自动配置', 'info');
+      openMpWhitelistModal(result.mpSync.ip || '');
+    }
+    await renderDashboard();
+  } catch (e) {
+    toast(`分析失败：${e.message}`, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-60', 'pointer-events-none');
+      btn.innerHTML = originalHtml;
+      initIcons(btn);
+    }
+  }
+}
+
+// 从浏览器获取数据：调起 MP 插件，用用户已登录的公众号后台会话抓一次准实时数据
+export async function fetchMpStats(el) {
+  const btn = el?.closest('button');
+  const originalHtml = btn?.innerHTML;
+  const restore = () => {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.remove('opacity-60', 'pointer-events-none');
+    btn.innerHTML = originalHtml;
+    initIcons(btn);
+  };
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+    toast('当前浏览器不支持插件调用，请用 Chrome 并安装 extension/mp-stats（见该目录 README）', 'error');
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'pointer-events-none');
+    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i><span>抓取中…</span>';
+    initIcons(btn);
+  }
+  toast('正在通过浏览器插件抓取公众号后台数据（最长约 1 分钟）…', 'info');
+  chrome.runtime.sendMessage(MP_EXT_ID, { type: 'mp-stats-sync-now' }, async (resp) => {
+    restore();
+    if (chrome.runtime.lastError) {
+      toast('未检测到数据同步插件，请先安装 extension/mp-stats（见该目录 README）', 'error');
+      return;
+    }
+    if (!resp?.ok) {
+      toast(`抓取失败：${resp?.error || '未知错误'}`, 'error');
+      return;
+    }
+    toast(resp.upserted ? `已从浏览器同步 ${resp.upserted} 篇（${resp.account}）` : '未解析到文章数据', resp.upserted ? 'success' : 'info');
+    await renderDashboard();
+  });
+}
+
+// ============ 公众号官方数据同步 + IP 白名单自动配置 ============
+
+let mpwlPollTimer = null;
+
+// 同步微信官方 T+1 阅读数据；40164（IP 不在白名单）时引导自动加白
+export async function syncMpOfficial(el, d) {
+  const btn = el?.closest('button');
+  const originalHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'pointer-events-none');
+    btn.innerHTML = '<i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i><span>同步中…</span>';
+    initIcons(btn);
+  }
+  try {
+    const data = await localApi(`my-accounts/${encodeURIComponent(d.id)}/sync-mp-official`, { method: 'POST' });
+    if (data.errcode === 40164) {
+      toast('官方接口被拒：当前出口 IP 不在公众平台白名单', 'error');
+      openMpWhitelistModal(data.ip || '');
+      return;
+    }
+    if (data.error) { toast(`同步失败：${data.error}`, 'error'); return; }
+    toast(data.synced
+      ? `已同步官方数据 ${data.synced} 条（${data.account}，T+1 口径）`
+      : (data.reason || '无可同步数据'), data.synced ? 'success' : 'info');
+    if (data.synced) await renderDashboard();
+  } catch (e) {
+    toast(`同步失败：${e.message}`, 'error');
+    // 500 上抛的 40164（token 阶段被拒）也引导加白
+    if (/40164|白名单|not in whitelist/i.test(e.message)) {
+      const ipMatch = e.message.match(/invalid ip ([\d.]+)/);
+      openMpWhitelistModal(ipMatch ? ipMatch[1] : '');
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-60', 'pointer-events-none');
+      btn.innerHTML = originalHtml;
+      initIcons(btn);
+    }
+  }
+}
+
+// 白名单自动配置弹窗：说明 + 出口 IP + 启动按钮 + 轮询状态/二维码
+export async function openMpWhitelistModal(ip = '') {
+  let detectedIp = ip;
+  if (!detectedIp) {
+    try {
+      const r = await localApi('mp-whitelist/outbound-ip');
+      detectedIp = r?.ip || '';
+    } catch { /* 探测失败留空，启动时后端再探 */ }
+  }
+  const modal = new Modal({
+    title: '自动配置 IP 白名单',
+    maxWidth: '560px',
+    onClose: () => { if (mpwlPollTimer) { clearInterval(mpwlPollTimer); mpwlPollTimer = null; } },
+    body: `
+      <div class="space-y-3 text-[12px]">
+        <div class="text-gray-400 leading-relaxed">
+          将自动驱动本机 Chrome 打开公众平台控制台，把出口 IP
+          <span class="text-cyan-300 font-mono">${esc(detectedIp || '（启动时自动探测）')}</span>
+          <b>追加</b>进「设置与开发 → 基本配置 → IP 白名单」（保留已有条目）。
+          过程需公众号管理员微信扫码 1~2 次，二维码会实时显示在下方。
+        </div>
+        <div id="mpwl-status" class="text-gray-500">未开始</div>
+        <div id="mpwl-qr" class="hidden"></div>
+        <div class="flex justify-end">
+          <button class="btn btn-primary py-1.5 px-3 text-[12px] inline-flex items-center gap-1.5" data-action="startMpWhitelistJob" data-ip="${esc(detectedIp)}">
+            <i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i><span>开始自动配置</span>
+          </button>
+        </div>
+        <div class="text-[10px] text-gray-600 leading-relaxed border-t border-white/5 pt-2">
+          说明：修改白名单是微信强制的管理员核验操作，扫码无法跳过；家宽 IP 变更后需重新配置一次。
+        </div>
+      </div>`,
+  });
+  modal.open();
+}
+
+// 启动加白任务并轮询状态（waiting_login/waiting_confirm 时展示页面截图供扫码）
+export async function startMpWhitelistJob(el, d) {
+  const btn = el?.closest('button');
+  const statusEl = document.getElementById('mpwl-status');
+  const qrEl = document.getElementById('mpwl-qr');
+  const setStatus = (html) => { if (statusEl) { statusEl.innerHTML = html; initIcons(statusEl); } };
+  if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'pointer-events-none'); }
+  setStatus('<span class="text-gray-400 inline-flex items-center gap-1.5"><i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>正在启动浏览器…</span>');
+  try {
+    const data = await localApi('mp-whitelist/auto', { method: 'POST', body: { ips: d.ip ? [d.ip] : [] } });
+    const jobId = data.jobId;
+    if (mpwlPollTimer) clearInterval(mpwlPollTimer);
+    mpwlPollTimer = setInterval(async () => {
+      let job;
+      try {
+        job = await localApi(`mp-whitelist/auto/${jobId}`);
+      } catch { return; } // 单轮失败忽略，下轮继续
+      if (job.status === 'done') {
+        clearInterval(mpwlPollTimer); mpwlPollTimer = null;
+        setStatus(`<span class="text-emerald-300">✓ ${esc(job.message || '白名单已更新')}</span>`);
+        if (qrEl) qrEl.classList.add('hidden');
+        toast('白名单配置完成，可重试「官方数据」同步', 'success');
+      } else if (job.status === 'error') {
+        clearInterval(mpwlPollTimer); mpwlPollTimer = null;
+        setStatus(`<span class="text-red-400 leading-relaxed">${esc(job.message || '配置失败')}</span>`);
+      } else {
+        setStatus(`<span class="text-gray-400 inline-flex items-center gap-1.5"><i data-lucide="loader-circle" class="w-3 h-3 animate-spin"></i>${esc(job.message || job.status)}</span>`);
+        if (job.qr && qrEl) {
+          qrEl.innerHTML = `<img src="data:image/png;base64,${job.qr}" class="w-full rounded border border-white/10" alt="控制台页面实时截图" />
+            <div class="text-[10px] text-gray-500 text-center mt-1">页面实时截图 · 手机微信扫码</div>`;
+          qrEl.classList.remove('hidden');
+        } else if (qrEl) {
+          qrEl.classList.add('hidden');
+        }
+      }
+    }, 2000);
+  } catch (e) {
+    setStatus(`<span class="text-red-400">${esc(e.message)}</span>`);
+    if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'pointer-events-none'); }
+  }
+}
