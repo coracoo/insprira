@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "灵感熔炉 · 公众号数据同步",
+  "version": "0.2.0",
+  "description": "在灵感熔炉页面点「从浏览器获取数据」，用你浏览器的真人登录态抓一次公众号后台「内容分析」数据并上报。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlPpZL7ABWgaORVhuTDUUyVycJw0eE0HvOAROYAce3CuQtXUalckXib7WnGNMFgmDM+LJqQ3OpGRjv9iefNnW3Qy7KXJxCj0KUuWrpC/Y97kmvCmg1lBX0fIx0qRqwaJqqfD1yjTyuFV++uj8mKi8l5wwezfeWW6D/U9cjyiAR8ECsk5vgBJ3QZaraMZldAJY+w+JEg2Om2Y+TTu9h/AksVly6hzhOduzkmdFglHqvB9Z79vnm7WnFLBQjRJZWuWT7a/iTvgtjcaDIhND/JD5xcT/Vm9ILU7ZbDBDQFAP5q4EgXZMKH5EkswfSl8/0GnETk23EViZn81ZGoZVXYdWlQIDAQAB",
+  "externally_connectable": {
+    "matches": ["*://*/*"]
+  },
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://mp.weixin.qq.com/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://mp.weixin.qq.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "同步公众号数据" },
+  "options_page": "options.html"
+}

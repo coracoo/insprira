@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>灵感熔炉 · 公众号数据同步设置</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 24px auto; padding: 0 16px; color: #1f2937; }
+    h1 { font-size: 18px; }
+    label { display: block; font-size: 13px; color: #6b7280; margin: 16px 0 4px; }
+    input[type=text], input[type=password] { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+    button { padding: 8px 16px; border: none; border-radius: 8px; background: #f59e0b; color: #fff; font-size: 14px; cursor: pointer; }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    #status { font-size: 13px; margin-top: 12px; }
+    .hint { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>灵感熔炉 · 公众号数据同步</h1>
+
+  <label for="serverUrl">灵感熔炉地址</label>
+  <input type="text" id="serverUrl" placeholder="http://localhost:8080">
+  <div class="hint">你的灵感熔炉访问地址，含端口，不要以 / 结尾</div>
+
+  <label for="token">INGEST_TOKEN</label>
+  <input type="password" id="token" placeholder="与服务端 .env 里的 INGEST_TOKEN 一致">
+
+  <label for="mpName">公众号名称</label>
+  <input type="text" id="mpName" placeholder="必须与「我的账号」里的公众号同名">
+
+  <div class="row">
+    <button id="save">保存</button>
+    <button id="test" class="secondary">测试连接</button>
+    <button id="syncNow" class="secondary">立即同步</button>
+  </div>
+  <div id="status"></div>
+  <div class="hint" style="margin-top:16px">同步为纯手动触发：在灵感熔炉「运营总览」账号行点「从浏览器获取数据」，或点上方「立即同步」。</div>
+
+  <script src="options.js"></script>
+</body>
+</html>
