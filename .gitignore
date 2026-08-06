@@ -6,6 +6,12 @@ node_modules/
 .env.local
 .env.*.local
 
+# 登录态 Cookie（含会话密钥，绝不能提交）
+cookies.json
+
+# 数据库备份（本地清理脚本产物）
+.tradis-backups/
+
 # SQLite 数据库与 WAL
 cache.db
 cache.db-shm
@@ -65,3 +71,8 @@ build/
 *.min.css.map
 # vendor/ 是本地化的第三方库，需要 commit
 !vendor/*.min.js
+
+# 本机 compose 覆盖（含个人路径/凭证挂载）
+docker-compose.override.yaml
+# 项目级 Claude skill 需要入库
+!.claude/skills/
